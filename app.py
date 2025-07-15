@@ -6,7 +6,7 @@ import tempfile
 import os
 
 st.set_page_config(layout="wide")
-st.title("画像サムネ＆日本語AI評価PDF完全版（プロンプト付き）")
+st.title("画像サムネ＆日本語AI評価PDF完全版（日本語フォント対応）")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード",
@@ -14,6 +14,15 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 image_data = []
+
+def get_jp_font(font_dir):
+    font_path = os.path.join(font_dir, "ipaexg.ttf")
+    if not os.path.exists(font_path):
+        # ダウンロード（Streamlit Cloud可）
+        import urllib.request
+        url = "https://moji.or.jp/wp-content/ipafont/IPAexfont/ipaexg00401/ipaexg.ttf"
+        urllib.request.urlretrieve(url, font_path)
+    return font_path
 
 if uploaded_files:
     st.subheader("Webサムネ比較一覧（4カラム＋日本語評価）")
@@ -29,7 +38,7 @@ if uploaded_files:
     csv_data = df_images.to_csv(index=False).encode('utf-8')
     st.download_button("画像リストCSVをダウンロード", csv_data, file_name="images_list.csv", mime='text/csv')
 
-    # 評価CSVアップロード（日本語フォーマット！）
+    # 評価CSVアップロード
     st.subheader("AI日本語評価CSVをアップロード（No/ファイル名/バズ期待値/静止画スコア/映像適性/理由）")
     eval_file = st.file_uploader("評価結果CSVをアップロード", type='csv', key='eval')
     if eval_file:
@@ -60,14 +69,18 @@ if uploaded_files:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
 
     # PDF自動生成（1ページ目に評価依頼文→2ページ目以降サムネ4枚/ページ）
-    st.markdown("#### 🎨 PDF（1ページ目プロンプト＋サムネ理想配置＋AI評価）を自動生成")
+    st.markdown("#### 🎨 PDF（日本語フォント＋プロンプト1ページ目付き）を自動生成")
     if st.button("サムネ一覧PDF生成・ダウンロード"):
         with tempfile.TemporaryDirectory() as tmpdir:
+            # IPAexGothic日本語フォント準備
+            font_path = get_jp_font(tmpdir)
+
             pdf = FPDF(orientation='L', unit='mm', format='A4')
+            pdf.add_font('IPAGothic', '', font_path, uni=True)
 
             # 1ページ目：プロンプト・手順
             pdf.add_page()
-            pdf.set_font("Arial", size=15)
+            pdf.set_font("IPAGothic", size=15)
             prompt_text = """【AI/ChatGPT評価依頼プロンプト】
 
 次の画像リストを「1枚ずつ独立して」評価してください。他の画像や順番、ファイル名の類似を参照しての比較・コメントは一切しないでください。
@@ -78,7 +91,7 @@ if uploaded_files:
 （このページの下に画像リストが続きます）
 """
             pdf.multi_cell(0, 12, prompt_text)
-            pdf.set_font("Arial", size=11)
+            pdf.set_font("IPAGothic", size=11)
 
             # 2ページ目以降：サムネ＋キャプション＋AI評価
             cell_w = (297 - 30) / 2   # 133.5mm
@@ -110,20 +123,20 @@ if uploaded_files:
 
                     # キャプション
                     pdf.set_xy(x+5, y+5+img_h+2)
-                    pdf.set_font("Arial", size=11)
+                    pdf.set_font("IPAGothic", size=11)
                     pdf.cell(cell_w - 10, 7, f"No.{idx+1}: {filenames[idx][:36]}", ln=1)
 
                     # 日本語AI評価
                     if eval_map and (idx+1) in eval_map and pd.notna(eval_map[idx+1].get('バズ期待値')):
                         pdf.set_xy(x+5, y+5+img_h+11)
-                        pdf.set_font("Arial", size=9)
+                        pdf.set_font("IPAGothic", size=9)
                         text = f"バズ:{eval_map[idx+1]['バズ期待値']} 静止画:{eval_map[idx+1]['静止画スコア']} 映像:{eval_map[idx+1]['映像適性']} / {eval_map[idx+1]['理由']}"
                         pdf.multi_cell(cell_w - 10, 5, text, align='L')
 
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
-                st.download_button("プロンプト付きPDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
+                st.download_button("プロンプト付き日本語PDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
 
 else:
     df_images = None
