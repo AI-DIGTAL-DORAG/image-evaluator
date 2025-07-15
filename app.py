@@ -7,7 +7,7 @@ import base64
 from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("画像No.自動付与＆評価システム｜4カラム400px＋評価名付き保存 完全版")
+st.title("画像No.自動付与＆評価システム｜4カラム400px＋評価名付き保存 完全版（CSVアップ下部）")
 
 st.markdown("""
 ⬇️ 評価フロー  
@@ -16,8 +16,8 @@ st.markdown("""
 3. 各サムネ下に「原寸DL」・「↓拡大」ボタン＋（評価アップロード時は評価結果も）  
 4. 拡大時は下部で最大表示（原寸DL可、拡大解除もOK）  
 5. 画像全体をNo連番ファイル名で一括ZIP DL  
-6. 評価CSVテンプレDL（AI評価指示文入り）・アップロード  
-7. 評価CSVアップ済みなら「採点スコア付きファイル名画像一括ZIP」DL可
+6. 評価CSVテンプレDL（AI評価指示文入り）  
+7. 評価済みCSVを下部からアップロード→スコア反映＆ファイル名付きZIP DL可
 """)
 
 uploaded_files = st.file_uploader(
@@ -35,8 +35,7 @@ def enlarge(idx):
 def clear_enlarge():
     st.session_state["enlarged_idx"] = None
 
-# 評価ファイルの先読み（サムネ下表示用に最初に読む）
-eval_map = {}
+# -------------------評価指示-------------------------
 eval_instruction = """【AI評価指示文（コピペ用）】
 各画像を「独立に」評価してください。比較や順番、ファイル名の類似などは一切考慮しないでください。
 No, BuzzScore, StillScore, VideoScore, Reason, TotalScoreの6列でCSV出力してください。
@@ -47,12 +46,10 @@ No, BuzzScore, StillScore, VideoScore, Reason, TotalScoreの6列でCSV出力し�
 - TotalScore: (BuzzScore点＋StillScore＋VideoScore点)/3（小数点1桁）
 例: 1,high,8,5star,まるで現実のような美しさ,9.3
 """
+# ---------------------------------------------------
 
-eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsv", help="アップロードすると各サムネ下に自動で評価が出ます")
-if eval_up:
-    df_eval = pd.read_csv(eval_up)
-    # 評価マップ作成（No: 内容dict）
-    eval_map = {int(row['No']): row for _, row in df_eval.iterrows()}
+# 評価マップ仮置き（後で評価CSVアップロードで初期化）
+eval_map = {}
 
 if uploaded_files:
     st.markdown("---")
@@ -82,21 +79,7 @@ if uploaded_files:
             # 拡大ボタン
             if st.button("↓拡大", key=f"enlarge_{idx}"):
                 enlarge(idx)
-            # 評価結果をサムネ下に（CSVアップ済み時のみ）
-            if eval_map.get(idx+1):
-                e = eval_map[idx+1]
-                st.markdown(
-                    f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
-                    <b>バズ期待値:</b> {e['BuzzScore']}　
-                    <b>静止画:</b> {e['StillScore']}　
-                    <b>映像適性:</b> {e['VideoScore']}<br>
-                    <b>総合スコア:</b> {e['TotalScore']}<br>
-                    <b>理由:</b> {e['Reason']}
-                    </div>""",
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)  # 空欄調整
+            # 評価結果（後で再描画）
 
     # 下部最大化表示エリア
     if st.session_state["enlarged_idx"] is not None:
@@ -129,30 +112,6 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # 🟢 評価スコア付きファイル名の画像一括ZIPダウンロード（評価CSVアップ時のみ）
-    if eval_map:
-        st.markdown("---")
-        st.subheader("評価スコア付きファイル名画像を一括ZIP DL")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
-            with ZipFile(zip_path, "w") as zipf:
-                for idx, img in enumerate(images):
-                    e = eval_map.get(idx+1, {})
-                    # ファイル名要素取得
-                    buzz = str(e.get("BuzzScore", ""))
-                    still = str(e.get("StillScore", ""))
-                    video = str(e.get("VideoScore", ""))
-                    total = str(e.get("TotalScore", ""))
-                    # NG文字除去・短縮・スペース置換
-                    def clean(s):
-                        return str(s).replace("/", "-").replace("\\", "-").replace(" ", "_")
-                    img_name = f"No{idx+1}_{clean(buzz)}_{clean(still)}_{clean(video)}_{clean(total)}.png"
-                    save_path = os.path.join(tmpdir, img_name)
-                    img.save(save_path)
-                    zipf.write(save_path, arcname=img_name)
-            with open(zip_path, "rb") as f:
-                st.download_button("評価名入りZIPダウンロード", f, file_name="Eval_named_images.zip")
-
     # 評価CSVテンプレDL（AI評価指示文入り）
     st.markdown("---")
     st.subheader("評価CSVテンプレートDL（AI評価指示文付き）")
@@ -162,7 +121,6 @@ if uploaded_files:
                             "VideoScore": ["" for _ in images],
                             "Reason": ["" for _ in images],
                             "TotalScore": ["" for _ in images]})
-    # 指示文行を最初に挿入
     instruct_df = pd.DataFrame([[eval_instruction,"","","","",""]], columns=eval_df.columns)
     eval_df = pd.concat([instruct_df, eval_df], ignore_index=True)
     csv_eval = eval_df.to_csv(index=False, encoding="utf-8")
@@ -178,5 +136,63 @@ if uploaded_files:
     - TotalScore: (BuzzScore点＋StillScore＋VideoScore点)/3（小数点1桁）
     """)
 
+    # ====== 下部：評価済みCSVアップロード＋スコア反映・ファイル名付きZIP ======
+    st.markdown("---")
+    st.subheader("評価済みCSVアップロード（スコア反映＆ファイル名付きZIP化）")
+    eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsvbottom", help="アップロードすると各サムネ下に自動で評価が出ます＆評価名付きZIP可")
+    if eval_up:
+        df_eval = pd.read_csv(eval_up)
+        eval_map = {int(row['No']): row for _, row in df_eval.iterrows()}
+
+        # 再度サムネを「評価スコア付き」で再描画
+        st.markdown("---")
+        st.subheader("【評価反映サムネ一覧】")
+        cols = st.columns(NUM_COLS)
+        for idx, img in enumerate(images):
+            with cols[idx % NUM_COLS]:
+                st.image(img, caption=f"No.{idx+1}", width=thumb_width)
+                buf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                img.save(buf, format="PNG")
+                buf.close()
+                with open(buf.name, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode()
+                dl_link = f'<a href="data:image/png;base64,{b64_img}" download="No{idx+1}.png">原寸DL</a>'
+                st.markdown(dl_link, unsafe_allow_html=True)
+                # 評価結果表示
+                if eval_map.get(idx+1) is not None:
+                    e = eval_map[idx+1]
+                    st.markdown(
+                        f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
+                        <b>バズ期待値:</b> {e['BuzzScore']}　
+                        <b>静止画:</b> {e['StillScore']}　
+                        <b>映像適性:</b> {e['VideoScore']}<br>
+                        <b>総合スコア:</b> {e['TotalScore']}<br>
+                        <b>理由:</b> {e['Reason']}
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)  # 空欄調整
+
+        # 評価スコア付きファイル名ZIPダウンロード
+        st.markdown("---")
+        st.subheader("評価スコア付きファイル名画像を一括ZIP DL")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
+            with ZipFile(zip_path, "w") as zipf:
+                for idx, img in enumerate(images):
+                    e = eval_map.get(idx+1, {})
+                    buzz = str(e.get("BuzzScore", ""))
+                    still = str(e.get("StillScore", ""))
+                    video = str(e.get("VideoScore", ""))
+                    total = str(e.get("TotalScore", ""))
+                    def clean(s):
+                        return str(s).replace("/", "-").replace("\\", "-").replace(" ", "_")
+                    img_name = f"No{idx+1}_{clean(buzz)}_{clean(still)}_{clean(video)}_{clean(total)}.png"
+                    save_path = os.path.join(tmpdir, img_name)
+                    img.save(save_path)
+                    zipf.write(save_path, arcname=img_name)
+            with open(zip_path, "rb") as f:
+                st.download_button("評価名入りZIPダウンロード", f, file_name="Eval_named_images.zip")
 else:
     st.info("画像をアップロードしてください。")
