@@ -1,10 +1,10 @@
 import streamlit as st
+import base64
 from PIL import Image
+import tempfile
 import pandas as pd
 from fpdf import FPDF
-import tempfile
 import os
-import base64
 
 st.set_page_config(layout="wide")
 st.title("画像評価AIサムネ比較システム")
@@ -24,20 +24,27 @@ uploaded_files = st.file_uploader(
     type=['png', 'jpg', 'jpeg'],
     accept_multiple_files=True
 )
-image_data = []
-orig_images = []
 
-# モーダル制御
-if 'modal_idx' not in st.session_state:
-    st.session_state['modal_idx'] = None
-
-def open_modal(idx):
-    st.session_state['modal_idx'] = idx
-
-def close_modal():
-    st.session_state['modal_idx'] = None
-
+# ----- JS/HTML式サムネクリック原寸モーダルのCSS&JS -----
 if uploaded_files:
+    st.markdown("""
+    <style>
+    .modal-bg {position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.92);z-index:10000;display:none;align-items:center;justify-content:center;}
+    .modal-bg.show {display:flex;}
+    .modal-img {border-radius:10px;box-shadow:0 0 30px #000;max-width:96vw;max-height:96vh;}
+    .modal-close {position:absolute;top:2vw;right:4vw;font-size:2.5rem;color:#fff;cursor:pointer;z-index:10002;}
+    .modal-label {position:fixed;top:2vw;left:3vw;color:#fff;font-size:2rem;z-index:10002;}
+    </style>
+    <script>
+    function openModal(idx) {
+      document.getElementById('modal'+idx).classList.add('show');
+    }
+    function closeModal(idx) {
+      document.getElementById('modal'+idx).classList.remove('show');
+    }
+    </script>
+    """, unsafe_allow_html=True)
+
     st.markdown("---")
     st.subheader("PDF自動生成＆ダウンロード")
     if st.button("PDF作成＆ダウンロード（Noのみ表示・エラーゼロ保証）"):
@@ -46,14 +53,15 @@ if uploaded_files:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
             pdf.add_page()
             pdf.set_font("Arial", size=14)
+            # ★ASCII ONLY! (No unicode, no Japanese, no "★" etc.)
             prompt_text = """INSTRUCTIONS FOR AI EVALUATION
 - Evaluate each image independently by its number (No). Do NOT compare with other images.
 - For each image, output these columns in CSV: No, BuzzScore, StillScore, VideoScore, Reason, TotalScore
 - BuzzScore: your integrated rating for viral potential (high/medium/low).
-- StillScore: 1–10 points (static visual quality).
-- VideoScore: 1–5 stars (video/animation potential).
-- Reason: short comment in Japanese about your evaluation.
-- TotalScore: ([BuzzScore: high=10/medium=7/low=3] + StillScore + [VideoScore: 1★=2, 2★=4, 3★=6, 4★=8, 5★=10]) / 3 (rounded to 1 decimal).
+- StillScore: 1-10 points (static visual quality).
+- VideoScore: 1-5 stars (use '1star', '2star', ... '5star', do not use non-ASCII marks).
+- Reason: short comment in Japanese about your evaluation. (But Reason is not shown in this PDF.)
+- TotalScore: ([BuzzScore: high=10/medium=7/low=3] + StillScore + [VideoScore: 1star=2, 2star=4, 3star=6, 4star=8, 5star=10]) / 3 (rounded to 1 decimal).
 - Output as CSV. After output, upload the CSV file to this app.
 """
             pdf.multi_cell(0, 10, prompt_text)
@@ -101,11 +109,11 @@ if uploaded_files:
         merged = pd.DataFrame({'No': [i+1 for i in range(len(uploaded_files))]})
         merged = pd.merge(merged, eval_df, on='No', how='left')
         eval_map = merged.set_index("No").to_dict("index")
-        st.markdown('<a id="grid_anchor"></a>', unsafe_allow_html=True)
         st.success("評価ファイルアップロード完了！下にサムネ評価一覧が表示されます。")
 
     st.markdown("---")
-    st.subheader("サムネ比較一覧（4カラム）｜サムネクリックで原寸プレビュー")
+    st.subheader("サムネ比較一覧（4カラム）｜サムネクリックで中央原寸モーダル")
+
     cols = st.columns(4)
     for idx, file in enumerate(uploaded_files):
         image = Image.open(file)
@@ -114,12 +122,19 @@ if uploaded_files:
         buffered.close()
         with open(buffered.name, "rb") as img_file:
             b64_img = base64.b64encode(img_file.read()).decode()
+        modal_id = f"modal{idx}"
+        img_tag = f"""
+        <a href="javascript:void(0);" onclick="openModal({idx});">
+            <img src="data:image/png;base64,{b64_img}" style="width:100%;border-radius:10px;box-shadow:0 0 10px #000;"/>
+        </a>
+        <div id="{modal_id}" class="modal-bg" onclick="closeModal({idx});">
+            <span class="modal-close" onclick="closeModal({idx});event.stopPropagation();">&times;</span>
+            <span class="modal-label">No.{idx+1}</span>
+            <img src="data:image/png;base64,{b64_img}" class="modal-img"/>
+        </div>
+        """
         with cols[idx % 4]:
-            st.image(image, caption=f"No.{idx+1}", width=220)
-            # サムネクリックでモーダル
-            btn_label = f"原寸プレビュー"
-            if st.button(btn_label, key=f"modal_btn_{idx}"):
-                open_modal(idx)
+            st.markdown(img_tag, unsafe_allow_html=True)
             eval_info = eval_map.get(idx+1)
             if eval_info and pd.notna(eval_info.get('BuzzScore')):
                 st.markdown(
@@ -134,26 +149,3 @@ if uploaded_files:
                 )
             else:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
-
-    # モーダル原寸プレビュー
-    if st.session_state['modal_idx'] is not None:
-        idx = st.session_state['modal_idx']
-        image = Image.open(uploaded_files[idx])
-        with st.container():
-            st.markdown(
-                """
-                <style>
-                .modal-bg {position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.88);z-index:1000;display:flex;align-items:center;justify-content:center;}
-                .modal-img {border-radius:10px;box-shadow:0 0 20px #000;}
-                .modal-close {position:absolute;top:2vw;right:4vw;font-size:2.5rem;color:#fff;cursor:pointer;}
-                </style>
-                """, unsafe_allow_html=True)
-            st.markdown('<div class="modal-bg" onclick="window.location.reload();">', unsafe_allow_html=True)
-            st.image(image, use_column_width=True, caption=f"No.{idx+1} 原寸")
-            st.markdown(
-                '<div class="modal-close" onclick="window.location.reload();">&times;</div></div>',
-                unsafe_allow_html=True
-            )
-        # セッション制御で閉じる
-        if st.button("モーダルを閉じる"):
-            close_modal()
