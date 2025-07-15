@@ -6,7 +6,7 @@ import tempfile
 import os
 
 st.set_page_config(layout="wide")
-st.title("画像サムネ＆日本語AI評価付PDF自動化（闇ポップ毒菓子式）")
+st.title("画像サムネ＆日本語AI評価PDF完全版（縦積み2カラム／評価付）")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード",
@@ -15,7 +15,6 @@ uploaded_files = st.file_uploader(
 )
 image_data = []
 
-# アップした画像リスト化
 if uploaded_files:
     st.subheader("Webサムネ比較一覧（4カラム＋日本語評価）")
     images = []
@@ -35,13 +34,12 @@ if uploaded_files:
     eval_file = st.file_uploader("評価結果CSVをアップロード", type='csv', key='eval')
     if eval_file:
         eval_df = pd.read_csv(eval_file)
-        # "No"でマージ
         merged = pd.merge(df_images, eval_df, on='No', how='left')
         eval_map = merged.set_index("No").to_dict("index")
     else:
         eval_map = {}
 
-    # サムネ＋日本語評価つきWebグリッド表示
+    # サムネ＋評価つきWebグリッド表示
     cols = st.columns(4)
     for idx, file in enumerate(uploaded_files):
         image = Image.open(file)
@@ -61,50 +59,51 @@ if uploaded_files:
             else:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
 
-    # PDF自動生成（サムネ＋日本語評価つき！）
-    st.markdown("#### 🎨 PDF（高画質サムネ＋日本語評価）を自動生成")
+    # PDF自動生成（2カラム縦積み＋評価つき！）
+    st.markdown("#### 🎨 PDF（2カラム縦積み＋日本語評価）を自動生成")
     if st.button("サムネ一覧PDF生成・ダウンロード"):
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
-            pdf.add_page()
-            cell_w, cell_h = 140, 90
+            cell_w, cell_h = 140, 105  # 画像・キャプション・評価セットの1枠サイズ
             margin_x, margin_y = 15, 15
             n_cols = 2
-            x, y = margin_x, margin_y
-            page_imgs = 0
-            pdf.set_font("Arial", size=11)
+            y_positions = [margin_y for _ in range(n_cols)]
+            page = 1
+            pdf.add_page()
+            pdf.set_font("Arial", size=10)
 
             for idx, img in enumerate(images):
+                col_idx = idx % n_cols
+                x = margin_x + cell_w * col_idx
+                y = y_positions[col_idx]
                 tmp_img_path = os.path.join(tmpdir, f"img_{idx}.jpg")
                 img_big = img.copy()
-                img_big.thumbnail((cell_w*4, cell_h*4))
+                img_big.thumbnail((cell_w*4, (cell_h-25)*4))
                 img_big.save(tmp_img_path, quality=95)
                 pdf.image(tmp_img_path, x=x+2, y=y+6, w=cell_w-6)
-                caption = f"No.{idx+1}: {filenames[idx][:40]}"
-                pdf.set_xy(x, y+cell_h-8)
+                caption = f"No.{idx+1}: {filenames[idx][:36]}"
+                pdf.set_xy(x, y+cell_h-24)
                 pdf.set_font("Arial", size=10)
-                pdf.multi_cell(cell_w-8, 7, caption, align='L')
+                pdf.multi_cell(cell_w-8, 6, caption, align='L')
 
-                # ↓日本語AI評価（CSVアップされてる場合のみ）
+                # 日本語AI評価（CSVアップありの場合のみ）
                 if eval_map and (idx+1) in eval_map and pd.notna(eval_map[idx+1].get('バズ期待値')):
-                    pdf.set_xy(x, y+cell_h-1)
+                    pdf.set_xy(x, y+cell_h-14)
                     pdf.set_font("Arial", size=9)
                     text = f"バズ期待値:{eval_map[idx+1]['バズ期待値']} 静止画:{eval_map[idx+1]['静止画スコア']} 映像適性:{eval_map[idx+1]['映像適性']} / 理由:{eval_map[idx+1]['理由']}"
                     pdf.multi_cell(cell_w-8, 5, text, align='L')
 
-                x += cell_w
-                page_imgs += 1
-                if page_imgs % n_cols == 0:
-                    x = margin_x
-                    y += cell_h
-                if page_imgs % (n_cols*2) == 0 and idx+1 < len(images):
-                    pdf.add_page()
-                    x, y, page_imgs = margin_x, margin_y, 0
+                y_positions[col_idx] += cell_h
 
+                # 改ページ判定（A4横いっぱいになったら）
+                if max(y_positions) + cell_h > 200 and idx+1 < len(images):
+                    pdf.add_page()
+                    y_positions = [margin_y for _ in range(n_cols)]
+                    pdf.set_font("Arial", size=10)
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
-                st.download_button("日本語AI評価つきPDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
+                st.download_button("2カラム日本語評価付きPDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
 
 else:
     df_images = None
