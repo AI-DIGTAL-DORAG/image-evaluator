@@ -22,7 +22,7 @@ if uploaded_files:
     filenames = []
     for idx, file in enumerate(uploaded_files):
         image = Image.open(file)
-        images.append(image.copy())  # PDF用に後で使う
+        images.append(image.copy())  # PDF用
         filenames.append(file.name)
         with cols[idx % 4]:
             st.image(image, caption=f"No.{idx+1}: {file.name}", width=220)
@@ -37,6 +37,7 @@ if uploaded_files:
     if st.button("サムネ一覧PDF生成・ダウンロード"):
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
+            pdf.add_page()  # 最初のページを先に追加！
             cell_w, cell_h = 140, 85   # 横140×縦85mmで大きめ
             margin_x, margin_y = 15, 15
             n_cols = 2
@@ -46,7 +47,7 @@ if uploaded_files:
             for idx, img in enumerate(images):
                 tmp_img_path = os.path.join(tmpdir, f"img_{idx}.jpg")
                 img_big = img.copy()
-                img_big.thumbnail((cell_w*4, cell_h*4))  # 高画質でPDFへ
+                img_big.thumbnail((cell_w*4, cell_h*4))  # 高画質
                 img_big.save(tmp_img_path, quality=95)
                 pdf.image(tmp_img_path, x=x+2, y=y+6, w=cell_w-6)
                 caption = f"No.{idx+1}: {filenames[idx][:40]}"
@@ -58,11 +59,9 @@ if uploaded_files:
                 if page_imgs % n_cols == 0:
                     x = margin_x
                     y += cell_h
-                if page_imgs % (n_cols*2) == 0:
+                if page_imgs % (n_cols*2) == 0 and idx+1 < len(images):
                     pdf.add_page()
                     x, y, page_imgs = margin_x, margin_y, 0
-            if page_imgs > 0:
-                pdf.add_page()
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
