@@ -6,17 +6,27 @@ import tempfile
 import os
 
 st.set_page_config(layout="wide")
-st.title("Image Evaluator｜Zero Unicode Error Guaranteed Edition")
+st.title("画像評価AIサムネ比較システム")
+
+st.markdown("""
+### 使い方（手順）
+1. **「画像をまとめてアップロード」**に、評価したい画像をまとめてドラッグ＆ドロップしてください。
+2. **「画像リストCSVをダウンロード」**で一覧CSVを取得できます。（No, FileName だけのシンプル形式）
+3. **AI評価依頼の際は「No」基準でCSVを作成**し、**ファイル名・コメントに日本語が含まれてもOKです**。
+4. **「評価CSVをアップロード」**でAI評価結果をアップし、サムネとともにWeb上で確認できます。
+5. **「PDFダウンロード」**では**Noのみ表示のサムネ比較用PDF**が生成されます。  
+　**ファイル名や日本語コメントはWeb画面または評価CSVで参照してください。**
+""")
 
 uploaded_files = st.file_uploader(
-    "Upload images",
+    "画像をまとめてアップロード",
     type=['png', 'jpg', 'jpeg'],
     accept_multiple_files=True
 )
 image_data = []
 
 if uploaded_files:
-    st.subheader("Web Thumbnail Grid (4 cols)")
+    st.subheader("Webサムネ比較一覧（4カラム／評価欄は英数字のみ）")
     images = []
     filenames = []
     for idx, file in enumerate(uploaded_files):
@@ -27,11 +37,11 @@ if uploaded_files:
 
     df_images = pd.DataFrame(image_data)
     csv_data = df_images.to_csv(index=False).encode('utf-8')
-    st.download_button("Download image list CSV", csv_data, file_name="images_list.csv", mime='text/csv')
+    st.download_button("画像リストCSVをダウンロード", csv_data, file_name="images_list.csv", mime='text/csv')
 
-    # Evaluation CSV upload (All columns English)
-    st.subheader("Upload AI Evaluation CSV (No/FileName/BuzzScore/StillScore/VideoScore/Reason)")
-    eval_file = st.file_uploader("Upload evaluation CSV", type='csv', key='eval')
+    # 評価CSVアップロード（No, FileName, BuzzScore, StillScore, VideoScore, Reason など英数字のみ）
+    st.subheader("AI評価CSVをアップロード（No, FileName, BuzzScore, StillScore, VideoScore, Reasonなど英数字列で）")
+    eval_file = st.file_uploader("評価結果CSVをアップロード", type='csv', key='eval')
     if eval_file:
         eval_df = pd.read_csv(eval_file)
         merged = pd.merge(df_images, eval_df, on='No', how='left')
@@ -39,12 +49,12 @@ if uploaded_files:
     else:
         eval_map = {}
 
-    # Web thumbnail grid with evaluation
+    # サムネ＋評価グリッド（PDF同様、キャプションはNoのみで絶対エラーなし！）
     cols = st.columns(4)
     for idx, file in enumerate(uploaded_files):
         image = Image.open(file)
         with cols[idx % 4]:
-            st.image(image, caption=f"No.{idx+1}: {file.name}", width=220)
+            st.image(image, caption=f"No.{idx+1}", width=220)
             eval_info = eval_map.get(idx+1)
             if eval_info and pd.notna(eval_info.get('BuzzScore')):
                 st.markdown(
@@ -52,36 +62,32 @@ if uploaded_files:
                     <b>BuzzScore:</b> {eval_info['BuzzScore']}　
                     <b>StillScore:</b> {eval_info['StillScore']}　
                     <b>VideoScore:</b> {eval_info['VideoScore']}<br>
-                    <b>Reason:</b> {eval_info['Reason']}
+                    <b>Reason:</b> {eval_info['Reason'] if eval_info['Reason'].isascii() else '[See CSV]'}
                     </div>""",
                     unsafe_allow_html=True
                 )
             else:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
 
-    # PDF generation (100% ASCII only in all text!)
-    st.markdown("#### 🎨 Generate PDF with English instructions (No Unicode Error)")
-    if st.button("Generate PDF with English Prompt"):
+    # PDF自動生成（Noのみキャプションで絶対エラーゼロ）
+    st.markdown("#### 📄 サムネPDF（番号のみキャプション／ファイル名・日本語非表示）を自動生成")
+    if st.button("サムネPDFダウンロード（エラーゼロ保証）"):
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
+            # 1ページ目にシンプルな英語指示文
             pdf.add_page()
             pdf.set_font("Arial", size=15)
-            prompt_text = """INSTRUCTIONS (For AI Evaluation)
-
-Please evaluate each image independently.
-Do NOT compare with other images or refer to file names or order.
-For each image, output the following columns in CSV:
-No, FileName, BuzzScore, StillScore, VideoScore, Reason
-BuzzScore: High / Medium / Low
-StillScore: 1-10 (integer)
-VideoScore: one to three stars (★,★★,★★★ or use "1-3 stars")
-Reason: short comment (You may use Japanese if needed.)
-After output, return the CSV file and upload to the app.
-"""
+            prompt_text = """INSTRUCTIONS FOR AI EVALUATION
+Please evaluate each image independently by its number (No.).
+Do NOT compare images or use file names.
+For each, output:
+No, BuzzScore, StillScore, VideoScore, Reason
+Reason/comments can be Japanese in the CSV, but will not appear in the PDF.
+Upload the completed CSV to the app."""
             pdf.multi_cell(0, 12, prompt_text)
             pdf.set_font("Arial", size=11)
 
-            # Thumbnail grid (A4 2x2 grid = 4 per page, captions ASCII only)
+            # 2ページ目以降: サムネ4枚/ページ（Noのみ表示）
             cell_w = (297 - 30) / 2   # 133.5mm
             cell_h = (210 - 30) / 2   # 90mm
             margin_x, margin_y = 15, 15
@@ -107,25 +113,15 @@ After output, return the CSV file and upload to the app.
                     img_big.save(tmp_img_path, quality=95)
                     pdf.image(tmp_img_path, x=x+5, y=y+5, h=img_h)
 
-                    # Caption (ASCII only)
+                    # キャプション（Noのみ）
                     pdf.set_xy(x+5, y+5+img_h+2)
                     pdf.set_font("Arial", size=11)
-                    pdf.cell(cell_w - 10, 7, f"No.{idx+1}: {filenames[idx][:36]}", ln=1)
-
-                    # Evaluation (Reason can include Japanese but safe as ASCII in PDF)
-                    if eval_map and (idx+1) in eval_map and pd.notna(eval_map[idx+1].get('BuzzScore')):
-                        pdf.set_xy(x+5, y+5+img_h+11)
-                        pdf.set_font("Arial", size=9)
-                        # Only English/ASCII for PDF text to guarantee safety
-                        text = f"Buzz: {eval_map[idx+1]['BuzzScore']} Still: {eval_map[idx+1]['StillScore']} Video: {eval_map[idx+1]['VideoScore']} / Reason: {eval_map[idx+1]['Reason']}"
-                        # (If Reason contains Japanese, you can skip or show '[see CSV]')
-                        # For total safety: pdf.multi_cell(cell_w - 10, 5, text.encode('ascii', 'ignore').decode('ascii'), align='L')
-                        pdf.multi_cell(cell_w - 10, 5, text, align='L')
+                    pdf.cell(cell_w - 10, 7, f"No.{idx+1}", ln=1)
 
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
-                st.download_button("Download PDF with English Prompt", f, file_name="image_grid.pdf", mime="application/pdf")
+                st.download_button("PDFダウンロード（Noのみ表示・Unicodeエラーゼロ保証）", f, file_name="image_grid.pdf", mime="application/pdf")
 
 else:
     df_images = None
