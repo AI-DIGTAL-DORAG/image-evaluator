@@ -6,7 +6,7 @@ import tempfile
 import os
 
 st.set_page_config(layout="wide")
-st.title("画像サムネ＆日本語AI評価PDF完全版（A4横・4枚/ページ・理想レイアウト）")
+st.title("画像サムネ＆日本語AI評価PDF完全版（アスペクト比優先・A4横4枚/ページ）")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード",
@@ -59,8 +59,8 @@ if uploaded_files:
             else:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
 
-    # PDF自動生成（A4横4枚/ページ・理想レイアウト）
-    st.markdown("#### 🎨 PDF（A4横4枚・キャプション＋日本語評価）を自動生成")
+    # PDF自動生成（アスペクト比維持・A4横4枚/ページ・理想レイアウト）
+    st.markdown("#### 🎨 PDF（アスペクト比維持・A4横4枚・キャプション＋日本語評価）を自動生成")
     if st.button("サムネ一覧PDF生成・ダウンロード"):
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
@@ -82,30 +82,36 @@ if uploaded_files:
 
                     img = images[idx]
                     tmp_img_path = os.path.join(tmpdir, f"img_{idx}.jpg")
-                    img_w = cell_w - 10
-                    img_h = cell_h - 25
-                    img_big = img.copy()
-                    img_big.thumbnail((int(img_w*3), int(img_h*3)))
-                    img_big.save(tmp_img_path, quality=95)
-                    pdf.image(tmp_img_path, x=x+5, y=y+5, w=img_w, h=img_h)
 
-                    # キャプション（画像下に）
-                    caption = f"No.{idx+1}: {filenames[idx][:36]}"
+                    # 高さ基準で横幅自動計算（アスペクト比維持）
+                    img_h = cell_h - 25   # 画像高さを枠内で固定（例65mmくらい）
+                    w0, h0 = img.size
+                    img_w = int(img_h * w0 / h0)
+
+                    # サムネ生成（3倍解像度で保存・高画質）
+                    img_big = img.copy()
+                    img_big = img_big.resize((img_w * 3, int(img_h * 3)))
+                    img_big.save(tmp_img_path, quality=95)
+
+                    # 画像描画（hだけ指定！wは自動スケール）
+                    pdf.image(tmp_img_path, x=x+5, y=y+5, h=img_h)
+
+                    # キャプション
                     pdf.set_xy(x+5, y+5+img_h+2)
                     pdf.set_font("Arial", size=11)
-                    pdf.cell(img_w, 7, caption, ln=1)
+                    pdf.cell(cell_w - 10, 7, f"No.{idx+1}: {filenames[idx][:36]}", ln=1)
 
-                    # 日本語AI評価（さらにその下）
+                    # 日本語AI評価
                     if eval_map and (idx+1) in eval_map and pd.notna(eval_map[idx+1].get('バズ期待値')):
                         pdf.set_xy(x+5, y+5+img_h+11)
                         pdf.set_font("Arial", size=9)
                         text = f"バズ:{eval_map[idx+1]['バズ期待値']} 静止画:{eval_map[idx+1]['静止画スコア']} 映像:{eval_map[idx+1]['映像適性']} / {eval_map[idx+1]['理由']}"
-                        pdf.multi_cell(img_w, 5, text, align='L')
+                        pdf.multi_cell(cell_w - 10, 5, text, align='L')
 
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
-                st.download_button("理想レイアウトPDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
+                st.download_button("アスペクト比優先PDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
 
 else:
     df_images = None
