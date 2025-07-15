@@ -6,7 +6,7 @@ import os
 from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜4軸100点評価＋コメントZIP完全版")
+st.title("AI画像評価システム｜Noリネーム＋スコア名ZIP完全版")
 
 # ------ 評価指示プロンプト（CSV1行目に内蔵） ------
 eval_instruction = """【AI画像・映像審査テンプレ（必ず守ること）】
@@ -64,7 +64,24 @@ if uploaded_files:
         with cols[idx % NUM_COLS]:
             st.image(img, caption=f"Img{idx+1}", width=thumb_width)
 
-    # 評価CSVテンプレDL（指示文1行目内蔵）
+    # --- No.連番リネームZIP一括DL ---
+    st.markdown("---")
+    st.subheader("No.連番リネーム画像を一括ZIP DL")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "No_images.zip")
+        for idx, file in enumerate(uploaded_files):
+            img = Image.open(file)
+            img_name = f"No{idx+1}.png"
+            save_path = os.path.join(tmpdir, img_name)
+            img.save(save_path)
+        with ZipFile(zip_path, "w") as zipf:
+            for idx in range(len(uploaded_files)):
+                img_name = f"No{idx+1}.png"
+                zipf.write(os.path.join(tmpdir, img_name), arcname=img_name)
+        with open(zip_path, "rb") as f:
+            st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
+
+    # --- 評価CSVテンプレDL（指示文1行目内蔵） ---
     st.markdown("---")
     st.subheader("評価CSVテンプレートDL（AI評価指示文付き）")
     eval_df = pd.DataFrame({"No": list(range(1, len(images)+1)),
@@ -85,7 +102,7 @@ if uploaded_files:
     3. 下で評価済みCSVをアップ→スコア＆コメント付きファイル名ZIP一括DL
     """)
 
-    # 評価済みCSVアップロード＆ZIP化
+    # --- 評価済みCSVアップロード＆ZIP化 ---
     st.markdown("---")
     st.subheader("評価済みCSVアップロード（スコア＋コメント付きファイル名ZIP化・高画質サムネ/拡大）")
     eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsvbottom")
