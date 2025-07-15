@@ -6,7 +6,7 @@ import tempfile
 import os
 
 st.set_page_config(layout="wide")
-st.title("画像サムネ＆日本語AI評価PDF完全版（アスペクト比優先・A4横4枚/ページ）")
+st.title("画像サムネ＆日本語AI評価PDF完全版（プロンプト付き）")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード",
@@ -59,15 +59,31 @@ if uploaded_files:
             else:
                 st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
 
-    # PDF自動生成（アスペクト比維持・A4横4枚/ページ・理想レイアウト）
-    st.markdown("#### 🎨 PDF（アスペクト比維持・A4横4枚・キャプション＋日本語評価）を自動生成")
+    # PDF自動生成（1ページ目に評価依頼文→2ページ目以降サムネ4枚/ページ）
+    st.markdown("#### 🎨 PDF（1ページ目プロンプト＋サムネ理想配置＋AI評価）を自動生成")
     if st.button("サムネ一覧PDF生成・ダウンロード"):
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf = FPDF(orientation='L', unit='mm', format='A4')
+
+            # 1ページ目：プロンプト・手順
+            pdf.add_page()
+            pdf.set_font("Arial", size=15)
+            prompt_text = """【AI/ChatGPT評価依頼プロンプト】
+
+次の画像リストを「1枚ずつ独立して」評価してください。他の画像や順番、ファイル名の類似を参照しての比較・コメントは一切しないでください。
+各画像について「バズ期待値／静止画スコア／映像適性／理由」を日本語で、一枚絵としての魅力のみから記入してください。
+評価内容はCSVでまとめて出力してください。
+出力後、依頼主にページに戻ってそのファイルを評価アップロード先に入れるよう伝えてください。
+
+（このページの下に画像リストが続きます）
+"""
+            pdf.multi_cell(0, 12, prompt_text)
+            pdf.set_font("Arial", size=11)
+
+            # 2ページ目以降：サムネ＋キャプション＋AI評価
             cell_w = (297 - 30) / 2   # 133.5mm
             cell_h = (210 - 30) / 2   # 90mm
             margin_x, margin_y = 15, 15
-            pdf.set_font("Arial", size=11)
 
             for page_start in range(0, len(images), 4):
                 pdf.add_page()
@@ -84,16 +100,12 @@ if uploaded_files:
                     tmp_img_path = os.path.join(tmpdir, f"img_{idx}.jpg")
 
                     # 高さ基準で横幅自動計算（アスペクト比維持）
-                    img_h = cell_h - 25   # 画像高さを枠内で固定（例65mmくらい）
+                    img_h = cell_h - 25
                     w0, h0 = img.size
                     img_w = int(img_h * w0 / h0)
-
-                    # サムネ生成（3倍解像度で保存・高画質）
                     img_big = img.copy()
                     img_big = img_big.resize((img_w * 3, int(img_h * 3)))
                     img_big.save(tmp_img_path, quality=95)
-
-                    # 画像描画（hだけ指定！wは自動スケール）
                     pdf.image(tmp_img_path, x=x+5, y=y+5, h=img_h)
 
                     # キャプション
@@ -111,7 +123,7 @@ if uploaded_files:
             pdf_output = os.path.join(tmpdir, "image_grid.pdf")
             pdf.output(pdf_output)
             with open(pdf_output, "rb") as f:
-                st.download_button("アスペクト比優先PDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
+                st.download_button("プロンプト付きPDFダウンロード", f, file_name="image_grid.pdf", mime="application/pdf")
 
 else:
     df_images = None
