@@ -1,151 +1,136 @@
 import streamlit as st
-import base64
 from PIL import Image
-import tempfile
 import pandas as pd
-from fpdf import FPDF
+import tempfile
 import os
+import base64
+import shutil
+from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("画像評価AIサムネ比較システム")
+st.title("画像No.自動付与＆評価システム｜完全最新版")
 
 st.markdown("""
-⬇️ 評価サイクル 4ステップ
-1. 画像をまとめてアップロード
-2. PDFを自動生成＆ダウンロード
-3. AIに新規チャットにてPDFファイルをそのまま渡し評価させる（CSV/テキスト出力まで自動）
-4. 評価CSVをアップロード → サムネ下にコメント/総合スコアが表示。サムネクリックで原寸DLもOK
-
-※ファイル名や評価コメントに日本語を使ってもOK！PDFはNoだけでエラーなし。
+⬇️ 評価フロー
+1. 画像をまとめてアップロード（ファイル名・順序は不問）
+2. 自動で「No.1, No.2, ...」を振ってサムネ一覧を表示（最大幅800pxまで拡大）
+3. サムネクリックで「下部に最大化表示」（疑似モーダル風）
+4. サムネ下に「原寸DL」ボタン（右クリック保存も可）
+5. 画像全体を「No.連番ファイル名」にリネームし、一括ZIP DL可
+6. 必要なNo.でAI評価依頼→評価テキストをコピペでCSV自動出力
 """)
 
 uploaded_files = st.file_uploader(
-    "画像をまとめてアップロード",
+    "画像をまとめてアップロード（ドラッグ＆ドロップ可）",
     type=['png', 'jpg', 'jpeg'],
     accept_multiple_files=True
 )
 
-# ----- JS/HTML式サムネクリック原寸モーダルのCSS&JS -----
+# Session state for enlarged view
+if "enlarged_idx" not in st.session_state:
+    st.session_state["enlarged_idx"] = None
+
+def enlarge(idx):
+    st.session_state["enlarged_idx"] = idx
+
+def clear_enlarge():
+    st.session_state["enlarged_idx"] = None
+
+def get_base64_image(img):
+    buf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+    img.save(buf, format="PNG")
+    buf.close()
+    with open(buf.name, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
 if uploaded_files:
-    st.markdown("""
-    <style>
-    .modal-bg {position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.92);z-index:10000;display:none;align-items:center;justify-content:center;}
-    .modal-bg.show {display:flex;}
-    .modal-img {border-radius:10px;box-shadow:0 0 30px #000;max-width:96vw;max-height:96vh;}
-    .modal-close {position:absolute;top:2vw;right:4vw;font-size:2.5rem;color:#fff;cursor:pointer;z-index:10002;}
-    .modal-label {position:fixed;top:2vw;left:3vw;color:#fff;font-size:2rem;z-index:10002;}
-    </style>
-    <script>
-    function openModal(idx) {
-      document.getElementById('modal'+idx).classList.add('show');
-    }
-    function closeModal(idx) {
-      document.getElementById('modal'+idx).classList.remove('show');
-    }
-    </script>
-    """, unsafe_allow_html=True)
-
     st.markdown("---")
-    st.subheader("PDF自動生成＆ダウンロード")
-    if st.button("PDF作成＆ダウンロード（Noのみ表示・エラーゼロ保証）"):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            images = [Image.open(f) for f in uploaded_files]
-            pdf = FPDF(orientation='L', unit='mm', format='A4')
-            pdf.add_page()
-            pdf.set_font("Arial", size=14)
-            # ★ASCII ONLY! (No unicode, no Japanese, no "★" etc.)
-            prompt_text = """INSTRUCTIONS FOR AI EVALUATION
-- Evaluate each image independently by its number (No). Do NOT compare with other images.
-- For each image, output these columns in CSV: No, BuzzScore, StillScore, VideoScore, Reason, TotalScore
-- BuzzScore: your integrated rating for viral potential (high/medium/low).
-- StillScore: 1-10 points (static visual quality).
-- VideoScore: 1-5 stars (use '1star', '2star', ... '5star', do not use non-ASCII marks).
-- Reason: short comment in Japanese about your evaluation. (But Reason is not shown in this PDF.)
-- TotalScore: ([BuzzScore: high=10/medium=7/low=3] + StillScore + [VideoScore: 1star=2, 2star=4, 3star=6, 4star=8, 5star=10]) / 3 (rounded to 1 decimal).
-- Output as CSV. After output, upload the CSV file to this app.
-"""
-            pdf.multi_cell(0, 10, prompt_text)
-            pdf.set_font("Arial", size=11)
-            cell_w = (297 - 30) / 2
-            cell_h = (210 - 30) / 2
-            margin_x, margin_y = 15, 15
+    st.subheader("サムネ一覧（最大800px幅／No.自動付与）")
 
-            for page_start in range(0, len(images), 4):
-                pdf.add_page()
-                for pos_in_page in range(4):
-                    idx = page_start + pos_in_page
-                    if idx >= len(images):
-                        break
-                    col = pos_in_page % 2
-                    row = pos_in_page // 2
-                    x = margin_x + cell_w * col
-                    y = margin_y + cell_h * row
-
-                    img = images[idx]
-                    tmp_img_path = os.path.join(tmpdir, f"img_{idx}.png")
-                    img_h = cell_h - 25
-                    w0, h0 = img.size
-                    img_w = int(img_h * w0 / h0)
-                    img_big = img.copy()
-                    img_big = img_big.resize((img_w * 3, int(img_h * 3)))
-                    img_big.save(tmp_img_path, format="PNG")
-                    pdf.image(tmp_img_path, x=x+5, y=y+5, h=img_h)
-                    pdf.set_xy(x+5, y+5+img_h+2)
-                    pdf.set_font("Arial", size=11)
-                    pdf.cell(cell_w - 10, 7, f"No.{idx+1}", ln=1)
-
-            pdf_output = os.path.join(tmpdir, "image_grid.pdf")
-            pdf.output(pdf_output)
-            with open(pdf_output, "rb") as f:
-                st.download_button("PDFダウンロード（Noのみ表示）", f, file_name="image_grid.pdf", mime="application/pdf")
-
-    st.markdown("---")
-    st.subheader("AI評価CSVアップロード（No, BuzzScore, StillScore, VideoScore, Reason, TotalScore）")
-    st.markdown("・CSVは必ず「No, BuzzScore, StillScore, VideoScore, Reason, TotalScore」列順で作成してください。")
-    eval_file = st.file_uploader("評価結果CSVをアップロード", type='csv', key='eval')
-    eval_map = {}
-    if eval_file:
-        eval_df = pd.read_csv(eval_file)
-        merged = pd.DataFrame({'No': [i+1 for i in range(len(uploaded_files))]})
-        merged = pd.merge(merged, eval_df, on='No', how='left')
-        eval_map = merged.set_index("No").to_dict("index")
-        st.success("評価ファイルアップロード完了！下にサムネ評価一覧が表示されます。")
-
-    st.markdown("---")
-    st.subheader("サムネ比較一覧（4カラム）｜サムネクリックで中央原寸モーダル")
-
-    cols = st.columns(4)
+    images = []
+    filemap = {}
     for idx, file in enumerate(uploaded_files):
-        image = Image.open(file)
-        buffered = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        image.save(buffered, format="PNG")
-        buffered.close()
-        with open(buffered.name, "rb") as img_file:
-            b64_img = base64.b64encode(img_file.read()).decode()
-        modal_id = f"modal{idx}"
-        img_tag = f"""
-        <a href="javascript:void(0);" onclick="openModal({idx});">
-            <img src="data:image/png;base64,{b64_img}" style="width:100%;border-radius:10px;box-shadow:0 0 10px #000;"/>
-        </a>
-        <div id="{modal_id}" class="modal-bg" onclick="closeModal({idx});">
-            <span class="modal-close" onclick="closeModal({idx});event.stopPropagation();">&times;</span>
-            <span class="modal-label">No.{idx+1}</span>
-            <img src="data:image/png;base64,{b64_img}" class="modal-img"/>
-        </div>
-        """
+        img = Image.open(file)
+        images.append(img.copy())
+        filemap[idx+1] = file.name  # No: FileName
+
+    # サムネ表示 (大きめ)
+    cols = st.columns(4)
+    for idx, img in enumerate(images):
         with cols[idx % 4]:
-            st.markdown(img_tag, unsafe_allow_html=True)
-            eval_info = eval_map.get(idx+1)
-            if eval_info and pd.notna(eval_info.get('BuzzScore')):
-                st.markdown(
-                    f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:-8px; margin-bottom:10px;">
-                    <b>バズ期待値:</b> {eval_info['BuzzScore']}　
-                    <b>静止画:</b> {eval_info['StillScore']}　
-                    <b>映像適性:</b> {eval_info['VideoScore']}<br>
-                    <b>総合スコア:</b> {eval_info['TotalScore']}<br>
-                    <b>理由:</b> {eval_info['Reason']}
-                    </div>""",
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
+            st.image(img, caption=f"No.{idx+1}", width=800)
+            # 原寸DLボタン
+            buf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            img.save(buf, format="PNG")
+            buf.close()
+            with open(buf.name, "rb") as f:
+                b64_img = base64.b64encode(f.read()).decode()
+            dl_link = f'<a href="data:image/png;base64,{b64_img}" download="No{idx+1}.png">原寸DL</a>'
+            st.markdown(dl_link, unsafe_allow_html=True)
+            # 疑似モーダル（下部最大化表示）
+            if st.button("↓拡大", key=f"enlarge_{idx}"):
+                enlarge(idx)
+
+    # 下部最大化表示エリア
+    if st.session_state["enlarged_idx"] is not None:
+        eidx = st.session_state["enlarged_idx"]
+        st.markdown("---")
+        st.markdown(f"### 🟢 No.{eidx+1} 最大表示")
+        st.image(images[eidx], use_column_width=True)
+        # 原寸DLボタン
+        buf2 = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+        images[eidx].save(buf2, format="PNG")
+        buf2.close()
+        with open(buf2.name, "rb") as f:
+            b64_img2 = base64.b64encode(f.read()).decode()
+        dl_link2 = f'<a href="data:image/png;base64,{b64_img2}" download="No{eidx+1}.png">原寸DL</a>'
+        st.markdown(dl_link2, unsafe_allow_html=True)
+        if st.button("拡大を閉じる"):
+            clear_enlarge()
+
+    # 一括No.連番リネーム＋ZIPダウンロード
+    st.markdown("---")
+    st.subheader("No.連番リネーム画像を一括ZIP DL")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "No_images.zip")
+        with ZipFile(zip_path, "w") as zipf:
+            for idx, img in enumerate(images):
+                img_name = f"No{idx+1}.png"
+                save_path = os.path.join(tmpdir, img_name)
+                img.save(save_path)
+                zipf.write(save_path, arcname=img_name)
+        with open(zip_path, "rb") as f:
+            st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
+
+    # 評価CSVテンプレDL（AI評価用No.管理雛形）
+    st.markdown("---")
+    st.subheader("評価CSVテンプレートDL（AI/人間評価用）")
+    eval_df = pd.DataFrame({"No": list(range(1, len(images)+1)),
+                            "BuzzScore": ["" for _ in images],
+                            "StillScore": ["" for _ in images],
+                            "VideoScore": ["" for _ in images],
+                            "Reason": ["" for _ in images],
+                            "TotalScore": ["" for _ in images]})
+    csv_eval = eval_df.to_csv(index=False).encode("utf-8")
+    st.download_button("評価CSVテンプレDL", csv_eval, file_name="eval_template.csv", mime="text/csv")
+
+    st.markdown("""
+    **評価ルール・プロンプト例（CSVやAI依頼時に添付）**  
+    - Noで指定した画像を「独立に」バズ期待値・静止画スコア・映像適性・理由・総合スコアで評価  
+    - BuzzScore: high/medium/low（点換算10/7/3）  
+    - StillScore: 1～10点  
+    - VideoScore: 1star～5star（点換算2～10）  
+    - Reason: 短い日本語コメント  
+    - TotalScore: (BuzzScore点＋StillScore＋VideoScore点)/3（小数点1桁）
+    """)
+
+    # 評価CSVアップロード＆内容表示（紐付け確認）
+    st.markdown("---")
+    st.subheader("評価CSVをアップロード（Noで自動紐付け・確認用）")
+    eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsv")
+    if eval_up:
+        df_eval = pd.read_csv(eval_up)
+        st.write(df_eval)
+
+else:
+    st.info("画像をアップロードしてください。")
