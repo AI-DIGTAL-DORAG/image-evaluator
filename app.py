@@ -4,20 +4,20 @@ import pandas as pd
 import tempfile
 import os
 import base64
-import shutil
 from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("画像No.自動付与＆評価システム｜4カラム400px最新版")
+st.title("画像No.自動付与＆評価システム｜4カラム400px＋評価名付き保存 完全版")
 
 st.markdown("""
 ⬇️ 評価フロー  
 1. 画像をまとめてアップロード  
 2. No.自動付与サムネ一覧（4カラム×400px幅で絶対被らない）  
-3. 各サムネ下に「原寸DL」・「↓拡大」ボタン  
+3. 各サムネ下に「原寸DL」・「↓拡大」ボタン＋（評価アップロード時は評価結果も）  
 4. 拡大時は下部で最大表示（原寸DL可、拡大解除もOK）  
 5. 画像全体をNo連番ファイル名で一括ZIP DL  
-6. 評価CSVテンプレDL・アップロード  
+6. 評価CSVテンプレDL（AI評価指示文入り）・アップロード  
+7. 評価CSVアップ済みなら「採点スコア付きファイル名画像一括ZIP」DL可
 """)
 
 uploaded_files = st.file_uploader(
@@ -26,7 +26,6 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# Session state for enlarged view
 if "enlarged_idx" not in st.session_state:
     st.session_state["enlarged_idx"] = None
 
@@ -35,6 +34,25 @@ def enlarge(idx):
 
 def clear_enlarge():
     st.session_state["enlarged_idx"] = None
+
+# 評価ファイルの先読み（サムネ下表示用に最初に読む）
+eval_map = {}
+eval_instruction = """【AI評価指示文（コピペ用）】
+各画像を「独立に」評価してください。比較や順番、ファイル名の類似などは一切考慮しないでください。
+No, BuzzScore, StillScore, VideoScore, Reason, TotalScoreの6列でCSV出力してください。
+- BuzzScore: high/medium/low（点換算10/7/3）
+- StillScore: 1～10点
+- VideoScore: 1star～5star（点換算2～10）
+- Reason: 短い日本語コメント
+- TotalScore: (BuzzScore点＋StillScore＋VideoScore点)/3（小数点1桁）
+例: 1,high,8,5star,まるで現実のような美しさ,9.3
+"""
+
+eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsv", help="アップロードすると各サムネ下に自動で評価が出ます")
+if eval_up:
+    df_eval = pd.read_csv(eval_up)
+    # 評価マップ作成（No: 内容dict）
+    eval_map = {int(row['No']): row for _, row in df_eval.iterrows()}
 
 if uploaded_files:
     st.markdown("---")
@@ -47,7 +65,6 @@ if uploaded_files:
         images.append(img.copy())
         filemap[idx+1] = file.name  # No: FileName
 
-    # サムネ表示（4カラム×400px）
     NUM_COLS = 4
     thumb_width = 400
     cols = st.columns(NUM_COLS)
@@ -65,6 +82,21 @@ if uploaded_files:
             # 拡大ボタン
             if st.button("↓拡大", key=f"enlarge_{idx}"):
                 enlarge(idx)
+            # 評価結果をサムネ下に（CSVアップ済み時のみ）
+            if eval_map.get(idx+1):
+                e = eval_map[idx+1]
+                st.markdown(
+                    f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
+                    <b>バズ期待値:</b> {e['BuzzScore']}　
+                    <b>静止画:</b> {e['StillScore']}　
+                    <b>映像適性:</b> {e['VideoScore']}<br>
+                    <b>総合スコア:</b> {e['TotalScore']}<br>
+                    <b>理由:</b> {e['Reason']}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)  # 空欄調整
 
     # 下部最大化表示エリア
     if st.session_state["enlarged_idx"] is not None:
@@ -97,17 +129,44 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # 評価CSVテンプレDL（AI評価用No.管理雛形）
+    # 🟢 評価スコア付きファイル名の画像一括ZIPダウンロード（評価CSVアップ時のみ）
+    if eval_map:
+        st.markdown("---")
+        st.subheader("評価スコア付きファイル名画像を一括ZIP DL")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
+            with ZipFile(zip_path, "w") as zipf:
+                for idx, img in enumerate(images):
+                    e = eval_map.get(idx+1, {})
+                    # ファイル名要素取得
+                    buzz = str(e.get("BuzzScore", ""))
+                    still = str(e.get("StillScore", ""))
+                    video = str(e.get("VideoScore", ""))
+                    total = str(e.get("TotalScore", ""))
+                    # NG文字除去・短縮・スペース置換
+                    def clean(s):
+                        return str(s).replace("/", "-").replace("\\", "-").replace(" ", "_")
+                    img_name = f"No{idx+1}_{clean(buzz)}_{clean(still)}_{clean(video)}_{clean(total)}.png"
+                    save_path = os.path.join(tmpdir, img_name)
+                    img.save(save_path)
+                    zipf.write(save_path, arcname=img_name)
+            with open(zip_path, "rb") as f:
+                st.download_button("評価名入りZIPダウンロード", f, file_name="Eval_named_images.zip")
+
+    # 評価CSVテンプレDL（AI評価指示文入り）
     st.markdown("---")
-    st.subheader("評価CSVテンプレートDL（AI/人間評価用）")
+    st.subheader("評価CSVテンプレートDL（AI評価指示文付き）")
     eval_df = pd.DataFrame({"No": list(range(1, len(images)+1)),
                             "BuzzScore": ["" for _ in images],
                             "StillScore": ["" for _ in images],
                             "VideoScore": ["" for _ in images],
                             "Reason": ["" for _ in images],
                             "TotalScore": ["" for _ in images]})
-    csv_eval = eval_df.to_csv(index=False).encode("utf-8")
-    st.download_button("評価CSVテンプレDL", csv_eval, file_name="eval_template.csv", mime="text/csv")
+    # 指示文行を最初に挿入
+    instruct_df = pd.DataFrame([[eval_instruction,"","","","",""]], columns=eval_df.columns)
+    eval_df = pd.concat([instruct_df, eval_df], ignore_index=True)
+    csv_eval = eval_df.to_csv(index=False, encoding="utf-8")
+    st.download_button("評価CSVテンプレDL（指示文付き）", csv_eval, file_name="eval_template.csv", mime="text/csv")
 
     st.markdown("""
     **評価ルール・プロンプト例（CSVやAI依頼時に添付）**  
@@ -118,14 +177,6 @@ if uploaded_files:
     - Reason: 短い日本語コメント  
     - TotalScore: (BuzzScore点＋StillScore＋VideoScore点)/3（小数点1桁）
     """)
-
-    # 評価CSVアップロード＆内容表示（紐付け確認）
-    st.markdown("---")
-    st.subheader("評価CSVをアップロード（Noで自動紐付け・確認用）")
-    eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsv")
-    if eval_up:
-        df_eval = pd.read_csv(eval_up)
-        st.write(df_eval)
 
 else:
     st.info("画像をアップロードしてください。")
