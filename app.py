@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜No連番サムネ・FileName主キー・完全版")
+st.title("AI画像評価システム｜FileName主キー・Noズレゼロ安全版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -50,7 +50,7 @@ if uploaded_files:
         with cols[idx % NUM_COLS]:
             st.image(img, caption=f"No{idx+1} / {fname}", width=thumb_width)
 
-    # --- No.連番リネームZIP一括DL（No1.png, No2.png...） ---
+    # --- No.連番リネームZIP一括DL ---
     st.markdown("---")
     st.subheader("No.連番リネーム画像を一括ZIP DL")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,13 +67,13 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AI評価プロンプト現場表示 ---
+    # --- AI評価プロンプト（現場でCSVアップ直前に明示） ---
     st.markdown("---")
     st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→Noリネーム画像を渡す）】")
     ai_prompt = """あなたはAI画像審査員です。
 
 【評価ルール】
-- 画像は「1枚ごとに完全独立」かつ「絶対評価」で採点してください。他画像との比較や相対減点は禁止です。
+- 各画像は“1枚ごとに完全独立”かつ“絶対評価”で採点してください。他の画像との比較・相対減点は禁止です。
 - 評価CSVはFileName主キーとし、No列や順位列は不要です。
 - Reason欄には各点数の理由・強み・短所も必ず明記。
 - 出力は下記形式を厳守。
@@ -81,16 +81,22 @@ if uploaded_files:
 【出力フォーマット】
 FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
-- FileNameには評価対象画像のファイル名（例：No3.png）を正確に記載してください（拡張子まで完全一致）。
+- FileNameには評価対象画像のファイル名（例：No3.png）を拡張子まで完全一致で記載してください。
 - 評価内容は各画像で完全独立（比較や連動点数は禁止）。
 - CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
+
+【例】
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+No1.png,97,95,96,95,"独自性とインパクトが強く、映像化にも向く。"
+No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
 """
     st.code(ai_prompt, language="markdown")
+    st.info("▲ このプロンプトをAIに貼付け、NoリネームZIP画像を渡して、CSVを返させてください。\nCSV生成指示も明記推奨。")
 
     # --- 評価済みCSV入力エリア（アップ & コピペ両対応）---
     st.markdown("---")
     st.markdown("### 🟢【AI評価CSVのアップロード or コピペ入力】")
-    eval_up = st.file_uploader("評価済みCSVをアップロード（FileName主キーでNo列なし）", type="csv", key="evalcsvbottom")
+    eval_up = st.file_uploader("評価済みCSVをアップロード（FileName主キーでNo列不要）", type="csv", key="evalcsvbottom")
     csv_text = st.text_area("AIが返した評価CSVをそのままコピペ（FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason）", height=150)
     df_eval = None
     if eval_up:
