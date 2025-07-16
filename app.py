@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜全自動評価フロー完全版")
+st.title("AI画像評価システム｜No連番サムネ・FileName主キー・完全版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -33,7 +33,7 @@ def clean_filename(s):
 
 if uploaded_files:
     st.markdown("---")
-    st.subheader("【ミニサムネ一覧／ファイル名表示】")
+    st.subheader("【ミニサムネ一覧／No連番＋ファイル名表示】")
     images = []
     filenames = []
     for file in uploaded_files:
@@ -48,9 +48,9 @@ if uploaded_files:
     cols = st.columns(NUM_COLS)
     for idx, (img, fname) in enumerate(zip(images, filenames)):
         with cols[idx % NUM_COLS]:
-            st.image(img, caption=f"{fname}", width=thumb_width)
+            st.image(img, caption=f"No{idx+1} / {fname}", width=thumb_width)
 
-    # --- No.連番リネームZIP一括DL ---
+    # --- No.連番リネームZIP一括DL（No1.png, No2.png...） ---
     st.markdown("---")
     st.subheader("No.連番リネーム画像を一括ZIP DL")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,9 +67,9 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AI評価プロンプトを“ここ”で現場表示 ---
+    # --- AI評価プロンプト現場表示 ---
     st.markdown("---")
-    st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→画像を渡す）】")
+    st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→Noリネーム画像を渡す）】")
     ai_prompt = """あなたはAI画像審査員です。
 
 【評価ルール】
@@ -84,14 +84,8 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 - FileNameには評価対象画像のファイル名（例：No3.png）を正確に記載してください（拡張子まで完全一致）。
 - 評価内容は各画像で完全独立（比較や連動点数は禁止）。
 - CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
-
-【例】
-FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
-No1.png,97,95,96,95,"独自性とインパクトが強く、映像化にも向く。"
-No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
 """
     st.code(ai_prompt, language="markdown")
-    st.info("▲ このプロンプトをAIに貼付け、NoリネームZIP画像を渡して、CSVを返させてください。\nCSV生成指示も明記推奨。")
 
     # --- 評価済みCSV入力エリア（アップ & コピペ両対応）---
     st.markdown("---")
@@ -110,13 +104,12 @@ No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
     # --- 評価反映サムネ＆拡大・一括DL機能 ---
     if df_eval is not None:
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（ファイル名マッチ・拡大ボタン付）】")
+        st.subheader("【評価反映サムネ一覧（No連番＋ファイル名・拡大ボタン付）】")
         eval_map = {clean_filename(row["FileName"]): row for _, row in df_eval.iterrows()}
         for idx, (img, fname_raw) in enumerate(zip(images, filenames)):
             fname = clean_filename(fname_raw)
             with cols[idx % NUM_COLS]:
-                st.image(img, width=thumb_width)
-                st.caption(fname_raw)
+                st.image(img, caption=f"No{idx+1} / {fname_raw}", width=thumb_width)
                 if fname in eval_map:
                     e = eval_map[fname]
                     st.markdown(
@@ -166,7 +159,7 @@ No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
                         s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
                         s = s.replace(" ", "_").replace("\n", "")
                         return s[:30]
-                    img_name = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                    img_name = f"No{idx+1}_{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
                     save_path = os.path.join(tmpdir, img_name)
                     img.save(save_path)
                     zipf.write(save_path, arcname=img_name)
