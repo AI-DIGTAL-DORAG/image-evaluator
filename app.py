@@ -40,10 +40,10 @@ if uploaded_files:
     NUM_COLS = 4
     thumb_width = 150
     cols = st.columns(NUM_COLS)
+    # ミニサムネは画像のみ表示（キャプションもNo名のみ、評価は一切表示しない！）
     for idx, img in enumerate(images):
-        no_fname = get_no_filename(idx)
         with cols[idx % NUM_COLS]:
-            st.image(img, caption=no_fname, width=thumb_width)
+            st.image(img, caption=get_no_filename(idx), width=thumb_width)
 
     # --- No.連番リネームZIP一括DL ---
     st.markdown("---")
@@ -109,33 +109,45 @@ No2.png,89,85,92,90,"静止画の完成度は高いが、バズ期待値はや�
         except Exception as e:
             st.warning("CSVの書式エラーまたは貼り付け内容不備")
 
-    # --- 評価反映サムネ＆拡大・一括DL機能 ---
+    # --- 評価反映サムネ「だけ」にスコア・コメントを出す（ミニサムネと完全分離） ---
     if df_eval is not None:
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（No連番名・拡大ボタン付）】")
-        eval_map = {row["FileName"].strip(): row for _, row in df_eval.iterrows()}
-        for idx, img in enumerate(images):
-            no_fname = get_no_filename(idx)
-            with cols[idx % NUM_COLS]:
-                st.image(img, caption=no_fname, width=thumb_width)
-                if no_fname in eval_map:
-                    e = eval_map[no_fname]
-                    st.markdown(
-                        f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
-                        <b>総合:</b> {e['TotalScore']}　
-                        <b>バズ:</b> {e['BuzzScore']}　
-                        <b>静止画:</b> {e['StillScore']}　
-                        <b>映像:</b> {e['VideoScore']}<br>
-                        <b>理由:</b> {e['Reason']}
-                        </div>""",
-                        unsafe_allow_html=True
-                    )
-                    if st.button("拡大", key=f"enlarge_eval_{idx}"):
-                        enlarge(idx)
-                else:
-                    st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+        st.subheader("【評価反映サムネ一覧（ソート・拡大付）】")
 
-        # 拡大サムネ：閉じるボタンで安全リセット（rerunエラー対策）
+        eval_map = {row["FileName"].strip(): row for _, row in df_eval.iterrows()}
+
+        # 評価CSVに基づいて総合得点（TotalScore）で降順ソート
+        sort_list = []
+        for idx in range(len(uploaded_files)):
+            no_fname = get_no_filename(idx)
+            e = eval_map.get(no_fname)
+            if e is not None:
+                try:
+                    sort_list.append((int(e['TotalScore']), idx, no_fname, e))
+                except Exception:
+                    sort_list.append((0, idx, no_fname, e)) # 点数空欄時0点
+
+        sort_list.sort(reverse=True)  # 総合得点降順
+
+        eval_cols = st.columns(NUM_COLS)
+        for col_idx, (score, idx, no_fname, e) in enumerate(sort_list):
+            img = Image.open(uploaded_files[idx])
+            with eval_cols[col_idx % NUM_COLS]:
+                st.image(img, caption=f"{no_fname} ({score})", width=thumb_width)
+                st.markdown(
+                    f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
+                    <b>総合:</b> {e['TotalScore']}　
+                    <b>バズ:</b> {e['BuzzScore']}　
+                    <b>静止画:</b> {e['StillScore']}　
+                    <b>映像:</b> {e['VideoScore']}<br>
+                    <b>理由:</b> {e['Reason']}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+                if st.button("拡大", key=f"enlarge_eval_{idx}"):
+                    enlarge(idx)
+
+        # 拡大サムネ（サムネ列と分離、エラー出ても画面落ちず必ず閉じられる）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -144,37 +156,29 @@ No2.png,89,85,92,90,"静止画の完成度は高いが、バズ期待値はや�
             st.image(img_big, use_column_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                try:
-                    st.experimental_rerun()
-                except Exception:
-                    pass
+                st.session_state["enlarged_idx"] = None
+                st.experimental_rerun()
 
-        # スコア＋コメント付きファイル名ZIPダウンロード
+        # 総合得点＋コメントファイル名画像を一括DL（No,拡張子を含めず先頭は点数）
         st.markdown("---")
-        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
+        st.subheader("総合得点_コメント名画像を一括ZIP DL")
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
             with ZipFile(zip_path, "w") as zipf:
-                for idx, file in enumerate(uploaded_files):
-                    img = Image.open(file)
-                    no_fname = get_no_filename(idx)
-                    e = eval_map.get(no_fname, {})
-                    total = str(e.get("TotalScore", ""))
-                    buzz = str(e.get("BuzzScore", ""))
-                    still = str(e.get("StillScore", ""))
-                    video = str(e.get("VideoScore", ""))
-                    reason = str(e.get("Reason", ""))
+                for score, idx, no_fname, e in sort_list:
+                    img = Image.open(uploaded_files[idx])
+                    # コメント短縮30字まで
                     def clean(s):
                         s = str(s)
                         s = s.replace("/", "／").replace("\\", "＼").replace(":", "：").replace("*", "＊")
                         s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
                         s = s.replace(" ", "_").replace("\n", "")
                         return s[:30]
-                    img_name = f"{no_fname}_{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                    img_name = f"{score}_{clean(e['Reason'])}.png"
                     save_path = os.path.join(tmpdir, img_name)
                     img.save(save_path)
                     zipf.write(save_path, arcname=img_name)
             with open(zip_path, "rb") as f:
-                st.download_button("スコア＋コメント名ZIPダウンロード", f, file_name="Eval_named_images.zip")
+                st.download_button("総合得点_コメントZIPダウンロード", f, file_name="Eval_named_images.zip")
 else:
     st.info("画像をアップロードしてください。")
