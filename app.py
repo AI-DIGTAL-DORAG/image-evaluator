@@ -8,7 +8,7 @@ from zipfile import ZipFile
 st.set_page_config(layout="wide")
 st.title("AI画像評価システム｜Noリネーム＋スコア名ZIP完全版")
 
-# ------ 評価指示プロンプト（CSV1行目に内蔵） ------
+# ------ AI/人間共通 評価指示プロンプト（CSV1行目に内蔵） ------
 eval_instruction = """【AI画像・映像審査テンプレ（必ず守ること）】
 あなたはAI画像/SNS映像作品の審査員です。
 以下4項目（各100点満点）で“必ず画像1枚ずつ独立して”絶対評価してください。他の画像との比較や順位付けは一切せず、それぞれの作品が持つ魅力や完成度だけを基準に評価します。
@@ -33,7 +33,7 @@ No,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 # ---------------------------------------------------
 
 uploaded_files = st.file_uploader(
-    "画像をまとめてアップロード（ドラッグ＆ドロップ可）",
+    "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
     type=['png', 'jpg', 'jpeg'],
     accept_multiple_files=True
 )
@@ -98,8 +98,8 @@ if uploaded_files:
     st.markdown("""
     **使い方:**  
     1. このCSVテンプレをダウンロード  
-    2. AI（または人）が指示に従い4軸×100点＋コメントで1枚ずつ独立評価→CSVへ記入  
-    3. 下で評価済みCSVをアップ→スコア＆コメント付きファイル名ZIP一括DL
+    2. AI（または人）が指示に従い4軸×100点＋理由で1枚ずつ独立評価→CSV記入  
+    3. 下の「評価済みCSVアップロード」欄にアップ→スコア名付き画像一括DLOK
     """)
 
     # --- 評価済みCSVアップロード＆ZIP化 ---
@@ -108,6 +108,9 @@ if uploaded_files:
     eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsvbottom")
     if eval_up:
         df_eval = pd.read_csv(eval_up)
+        # 1行目が指示文の場合削除
+        if not str(df_eval.iloc[0]["No"]).isdigit():
+            df_eval = df_eval.iloc[1:].reset_index(drop=True)
         eval_map = {int(row['No']): row for _, row in df_eval.iterrows()}
         st.markdown("---")
         st.subheader("【評価反映サムネ一覧（高画質/拡大ボタン付）】")
