@@ -6,7 +6,7 @@ import os
 from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜ファイル名一致・AI評価フロー完全版")
+st.title("AI画像評価システム｜FileName主軸・Noカラム排除版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -59,61 +59,44 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AIプロンプト＋半自動運用ガイド＋ファイル名カラム仕様 ---
+    # --- AIプロンプト＆現場運用ガイド表示 ---
     st.markdown("---")
-    st.markdown("## 🟣【AI評価プロンプト＆半自動運用ガイド】")
+    st.markdown("## 🟣【AI評価プロンプト＆FileName主軸ガイド】")
     ai_prompt = """あなたはAI画像・SNS映像審査専用の評価AIです。
 
 【評価ルール】
 - 画像は“1枚ごとに完全独立”で採点してください。他の画像との比較・順位づけ・相対評価・連動配点は禁止です。
 - 評価軸は4つ（各100点満点）。各項目の意味・観点は下記通りで、重複や曖昧な採点は不可です。
 - Reason欄には各軸の得点理由・点差の根拠・強みや特徴を必ず具体的に記述してください（重複や抽象的なコメントは禁止）。
-- 【重要】CSVには「FileName」列を必ず追加し、評価対象画像のファイル名（例：No3.png）を記載してください。
-
-【評価軸説明】
-1. 総合スコア（TotalScore）…静止画・映像化・技術・唯一性・世界観・物語性など、全体完成度を総合的に採点
-2. BuzzScore（バズ期待値）…SNS・タイムライン・サムネイルでのバズ力・拡散力
-3. StillScore（静止画スコア）…一枚絵としての美しさ・構図・色彩・芸術性・唯一性
-4. VideoScore（映像適性スコア）…SORAやMV化した際の映え度・動きやすさ・映像向きか
+- 【重要】CSVには「FileName」列だけを一番左端に置き、Noカラムは絶対不要。FileNameに必ず評価対象画像ファイル名（例：No3.pngやオリジナル名）を記載してください。
 
 【出力フォーマット】
-No,FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
-【運用ガイド】
-1. 上記プロンプトをAIチャット（ChatGPT/Claude等）に必ずコピペして貼り付けてください。
-2. AIが「画像をアップロードしてください」と返すのを必ず確認。
-3. その後、NoリネームZIP画像やファイル名順画像をAIにまとめて送信してください。
-4. AIが評価（CSV形式テキスト）を返した時点では“ファイルとしては出力されません”。
-5. 評価テキストが出力されたら、「この内容をCSVファイルとして出力してください」とAIに依頼してください。
-6. AIがCSVファイルを生成したら、そのファイルをダウンロードしてください。
-7. 下の「評価済みCSVアップロード」へ流し込めばOKです。
-
-【注意】
-- ChatGPTなど多くのAIチャットでは、評価結果はまずテキストで出力されます。
-- CSVファイル形式でのダウンロードが必要な場合は、“CSVファイルで出力してください”とAIに依頼する必要があります。
-- 必ず「FileName」列でファイル名と評価が正確に紐付くよう運用してください。
+【出力例】
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+No1.png,95,100,93,97,"独自の質感と構図、バズの爆発力も高い。静止画・動画ともに主役級の映え方。"
+No2.png,89,85,92,90,"静止画の完成度は高いが唯一性で減点、バズはやや控えめ。"
 """
     st.code(ai_prompt, language="markdown")
     st.markdown("""
-    **【半自動運用手順：現実のAI評価フロー】**  
+    **【FileName主軸：現実のAI評価運用フロー】**  
     1. 上記プロンプトをAIチャットに貼り付け→「画像をください」確認  
-    2. NoリネームZIP画像やファイル名順画像をそのまま投げる  
-    3. AIがCSV形式の評価テキストを返す  
-    4. AIに「この内容をCSVファイルで出力してください」と依頼（必須）  
-    5. CSVファイルをダウンロード  
-    6. この画面で「評価済みCSVアップロード」→ZIP/サムネ一覧連携  
+    2. NoリネームZIP画像やファイル名順画像をAIに投げる  
+    3. AIが「FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason」のCSVテキスト評価を返す  
+    4. 「CSVファイルで出力してください」とAIに依頼→CSVダウンロード  
+    5. 下の「評価済みCSVアップロード」へ流し込めばOK  
     """)
 
-    # --- 評価済みCSVアップロード＆ZIP化（FileNameマッチング対応） ---
+    # --- 評価済みCSVアップロード＆ZIP化（FileNameマッチングのみ対応） ---
     st.markdown("---")
-    st.subheader("評価済みCSVアップロード（ファイル名マッチ＋高画質サムネ/拡大）")
+    st.subheader("評価済みCSVアップロード（FileName一致のみで高画質サムネ/拡大）")
     eval_up = st.file_uploader("評価済みCSVをアップ", type="csv", key="evalcsvbottom")
     if eval_up:
         df_eval = pd.read_csv(eval_up)
-        # ファイル名→評価マップ
         eval_map = {str(row['FileName']): row for _, row in df_eval.iterrows()}
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（ファイル名マッチ・高画質/拡大ボタン付）】")
+        st.subheader("【評価反映サムネ一覧（FileNameマッチ・高画質/拡大ボタン付）】")
         cols = st.columns(NUM_COLS)
         for idx, file in enumerate(uploaded_files):
             img = Image.open(file)
@@ -137,7 +120,6 @@ No,FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                 else:
                     st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
 
-        # --- 拡大サムネ：閉じるボタンで確実に消えるバグ修正版 ---
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -148,7 +130,6 @@ No,FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                 clear_enlarge()
                 st.experimental_rerun()
 
-        # スコア＋コメント付きファイル名ZIPダウンロード
         st.markdown("---")
         st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
         with tempfile.TemporaryDirectory() as tmpdir:
