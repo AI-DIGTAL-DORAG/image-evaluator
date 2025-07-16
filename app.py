@@ -6,7 +6,7 @@ import os
 from zipfile import ZipFile
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜Noリネーム＋スコア名ZIP完全版")
+st.title("AI画像評価システム｜Noリネーム＋AI評価フロー完全版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -57,7 +57,7 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- ここで初めてプロンプト表示！ ---
+    # --- AIプロンプト表示（ここが自動評価フローの肝！） ---
     st.markdown("---")
     st.markdown("## 🟣【AI評価プロンプト（コピペ→AIチャットに貼り付け！）】")
     ai_prompt = """あなたはAI画像・SNS映像審査専用の評価AIです。
