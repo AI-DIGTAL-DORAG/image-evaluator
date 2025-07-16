@@ -7,7 +7,7 @@ from zipfile import ZipFile
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜No連番サムネ・増殖ゼロ・完全一致版")
+st.title("AI Images Evaluation")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -29,7 +29,7 @@ def get_no_filename(idx):
 
 if uploaded_files:
     st.markdown("---")
-    st.subheader("【ミニサムネ一覧／No連番のみ表示】")
+    st.subheader("【ミニサムネ一覧】")
     images = []
     for file in uploaded_files:
         img = Image.open(file)
@@ -47,7 +47,7 @@ if uploaded_files:
 
     # --- No.連番リネームZIP一括DL ---
     st.markdown("---")
-    st.subheader("No.連番リネーム画像を一括ZIP DL")
+    st.subheader("Noリネーム画像一括ZIP DL")
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, "No_images.zip")
         for idx, file in enumerate(uploaded_files):
@@ -60,30 +60,45 @@ if uploaded_files:
                 img_name = get_no_filename(idx)
                 zipf.write(os.path.join(tmpdir, img_name), arcname=img_name)
         with open(zip_path, "rb") as f:
-            st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
+            st.download_button("NoリネームZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AI評価プロンプト ---
+    # --- AI評価プロンプト（現場正規版） ---
     st.markdown("---")
-    st.markdown("## 🟣【AI評価プロンプト（No連番画像専用）】")
-    ai_prompt = """あなたはAI画像審査員です。
+    st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ）】")
+    ai_prompt = """
+あなたはAI画像・SNS映像審査専用の評価AIです。
 
 【評価ルール】
-- 各画像は「No1.png, No2.png, ...」のファイル名で完全独立絶対評価してください。
-- 評価CSVはFileName主キーのみ。No列や元名列は不要。
-- Reason欄には点数根拠・短所も具体的に明記。
+- 画像は“1枚ごとに完全独立”で採点してください。他の画像との比較・順位づけ・相対評価・連動配点は禁止です。
+- 評価軸は4つ（各100点満点）。各項目の意味・観点は下記通りで、重複や曖昧な採点は不可です。
+- Reason欄には各軸の得点理由・点差の根拠・強みや特徴を必ず具体的に記述してください（重複や抽象的なコメントは禁止）。
+
+【評価軸説明】
+1. 総合スコア（TotalScore）…静止画・映像化・技術・唯一性・世界観・物語性など、全体完成度を総合的に採点
+2. BuzzScore（バズ期待値）…SNS・タイムライン・サムネイルでのバズ力・拡散力
+3. StillScore（静止画スコア）…一枚絵としての美しさ・構図・色彩・芸術性・唯一性
+4. VideoScore（映像適性スコア）…SORAやMV化した際の映え度・動きやすさ・映像向きか
 
 【出力フォーマット】
 FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
-- FileNameには「No1.png」など連番ファイル名を必ず記載してください（拡張子・大文字小文字・空白含め完全一致）。
-- CSVは1行目ヘッダー、以降は画像ごと1行。
+【絶対運用ルール】
+- 画像を受信したら、各画像を“完全独立”かつ“厳格”に評価し、上記CSV形式で全件まとめて一括出力してください。
+- 評価以外の説明・質問・案内・確認・雑談・処理提案は一切禁止です。
+- FileName列にはNo1.png, No2.png…などAIに渡した「ZIPの画像ファイル名」を必ず正確に記載してください（拡張子も含め完全一致）。
+- 画像が受信されていない場合のみ、「画像をアップロードしてください」とだけ返答してください。
+
+【出力例】
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+No1.png,95,100,93,97,"総合力が非常に高く、特にSNSバズ度が圧倒的。静止画としても引力が強く、MV化しても主役級で動き映える。"
+No2.png,89,85,92,90,"静止画の完成度は高いが、バズ期待値はやや控えめ。映像化もしやすい。"
 """
     st.code(ai_prompt, language="markdown")
 
     # --- 評価済みCSV入力エリア（アップ & コピペ両対応）---
     st.markdown("---")
     st.markdown("### 🟢【AI評価CSVのアップロード or コピペ入力】")
-    eval_up = st.file_uploader("評価済みCSVをアップロード（FileName主キーでNo列不要）", type="csv", key="evalcsvbottom")
+    eval_up = st.file_uploader("評価済みCSVをアップロード（FileName主キー）", type="csv", key="evalcsvbottom")
     csv_text = st.text_area("AIが返した評価CSVをそのままコピペ（FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason）", height=150)
     df_eval = None
     if eval_up:
@@ -120,7 +135,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                 else:
                     st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
 
-        # 拡大サムネ：閉じるボタンで消す
+        # 拡大サムネ：閉じるボタンで安全リセット（rerunエラー対策）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -129,7 +144,10 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
             st.image(img_big, use_column_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                st.experimental_rerun()
+                try:
+                    st.experimental_rerun()
+                except Exception:
+                    pass
 
         # スコア＋コメント付きファイル名ZIPダウンロード
         st.markdown("---")
