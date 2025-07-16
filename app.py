@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜FileName一致・CSVコピペ/アップ両対応・完全版")
+st.title("AI画像評価システム｜全自動評価フロー完全版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -31,23 +31,9 @@ def clean_filename(s):
     s = unicodedata.normalize("NFKC", s)
     return s.lower()
 
-# --- 評価データ入力欄（アップ or コピペ） ---
-df_eval = None
-st.markdown("### 🟢【AI評価CSVアップ or コピペ】")
-eval_up = st.file_uploader("評価済みCSVファイルをアップ（推奨：FileName主キーでNo列なし）", type="csv", key="evalcsvbottom")
-csv_text = st.text_area("AIが返した評価CSVをそのままコピペ（FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason）", height=150)
-
-if eval_up:
-    df_eval = pd.read_csv(eval_up)
-elif csv_text:
-    try:
-        df_eval = pd.read_csv(io.StringIO(csv_text))
-    except Exception as e:
-        st.warning("CSVの書式エラーまたは貼り付け内容不備")
-
 if uploaded_files:
     st.markdown("---")
-    st.subheader("【評価反映サムネ一覧（ファイル名マッチ・拡大ボタン付）】")
+    st.subheader("【ミニサムネ一覧／ファイル名表示】")
     images = []
     filenames = []
     for file in uploaded_files:
@@ -60,46 +46,131 @@ if uploaded_files:
     NUM_COLS = 4
     thumb_width = 150
     cols = st.columns(NUM_COLS)
-    # 評価マップ（ファイル名クリーン化マッチ！）
-    eval_map = {}
-    if df_eval is not None:
-        for _, row in df_eval.iterrows():
-            fname = clean_filename(row["FileName"])
-            eval_map[fname] = row
-
-    for idx, (img, fname_raw) in enumerate(zip(images, filenames)):
-        fname = clean_filename(fname_raw)
+    for idx, (img, fname) in enumerate(zip(images, filenames)):
         with cols[idx % NUM_COLS]:
-            st.image(img, width=thumb_width)
-            # ファイル名を下に小さく表示
-            st.caption(fname_raw)
-            # 評価内容表示
-            if fname in eval_map:
-                e = eval_map[fname]
-                st.markdown(
-                    f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
-                    <b>総合:</b> {e['TotalScore']}　
-                    <b>バズ:</b> {e['BuzzScore']}　
-                    <b>静止画:</b> {e['StillScore']}　
-                    <b>映像:</b> {e['VideoScore']}<br>
-                    <b>理由:</b> {e['Reason']}
-                    </div>""",
-                    unsafe_allow_html=True
-                )
-                if st.button("拡大", key=f"enlarge_eval_{idx}"):
-                    enlarge(idx)
-            else:
-                st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+            st.image(img, caption=f"{fname}", width=thumb_width)
 
-    # 拡大サムネ：閉じるボタンで消す
-    if st.session_state["enlarged_idx"] is not None:
-        eidx = st.session_state["enlarged_idx"]
-        img_big = Image.open(uploaded_files[eidx])
+    # --- No.連番リネームZIP一括DL ---
+    st.markdown("---")
+    st.subheader("No.連番リネーム画像を一括ZIP DL")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "No_images.zip")
+        for idx, file in enumerate(uploaded_files):
+            img = Image.open(file)
+            img_name = f"No{idx+1}.png"
+            save_path = os.path.join(tmpdir, img_name)
+            img.save(save_path)
+        with ZipFile(zip_path, "w") as zipf:
+            for idx in range(len(uploaded_files)):
+                img_name = f"No{idx+1}.png"
+                zipf.write(os.path.join(tmpdir, img_name), arcname=img_name)
+        with open(zip_path, "rb") as f:
+            st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
+
+    # --- AI評価プロンプトを“ここ”で現場表示 ---
+    st.markdown("---")
+    st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→画像を渡す）】")
+    ai_prompt = """あなたはAI画像審査員です。
+
+【評価ルール】
+- 画像は「1枚ごとに完全独立」かつ「絶対評価」で採点してください。他画像との比較や相対減点は禁止です。
+- 評価CSVはFileName主キーとし、No列や順位列は不要です。
+- Reason欄には各点数の理由・強み・短所も必ず明記。
+- 出力は下記形式を厳守。
+
+【出力フォーマット】
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+
+- FileNameには評価対象画像のファイル名（例：No3.png）を正確に記載してください（拡張子まで完全一致）。
+- 評価内容は各画像で完全独立（比較や連動点数は禁止）。
+- CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
+
+【例】
+FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
+No1.png,97,95,96,95,"独自性とインパクトが強く、映像化にも向く。"
+No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
+"""
+    st.code(ai_prompt, language="markdown")
+    st.info("▲ このプロンプトをAIに貼付け、NoリネームZIP画像を渡して、CSVを返させてください。\nCSV生成指示も明記推奨。")
+
+    # --- 評価済みCSV入力エリア（アップ & コピペ両対応）---
+    st.markdown("---")
+    st.markdown("### 🟢【AI評価CSVのアップロード or コピペ入力】")
+    eval_up = st.file_uploader("評価済みCSVをアップロード（FileName主キーでNo列なし）", type="csv", key="evalcsvbottom")
+    csv_text = st.text_area("AIが返した評価CSVをそのままコピペ（FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason）", height=150)
+    df_eval = None
+    if eval_up:
+        df_eval = pd.read_csv(eval_up)
+    elif csv_text:
+        try:
+            df_eval = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.warning("CSVの書式エラーまたは貼り付け内容不備")
+
+    # --- 評価反映サムネ＆拡大・一括DL機能 ---
+    if df_eval is not None:
         st.markdown("---")
-        st.markdown(f"### 🟢 高画質最大表示")
-        st.image(img_big, use_column_width=True)
-        if st.button("拡大を閉じる", key="close_enlarge_eval"):
-            clear_enlarge()
-            st.experimental_rerun()
+        st.subheader("【評価反映サムネ一覧（ファイル名マッチ・拡大ボタン付）】")
+        eval_map = {clean_filename(row["FileName"]): row for _, row in df_eval.iterrows()}
+        for idx, (img, fname_raw) in enumerate(zip(images, filenames)):
+            fname = clean_filename(fname_raw)
+            with cols[idx % NUM_COLS]:
+                st.image(img, width=thumb_width)
+                st.caption(fname_raw)
+                if fname in eval_map:
+                    e = eval_map[fname]
+                    st.markdown(
+                        f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
+                        <b>総合:</b> {e['TotalScore']}　
+                        <b>バズ:</b> {e['BuzzScore']}　
+                        <b>静止画:</b> {e['StillScore']}　
+                        <b>映像:</b> {e['VideoScore']}<br>
+                        <b>理由:</b> {e['Reason']}
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+                    if st.button("拡大", key=f"enlarge_eval_{idx}"):
+                        enlarge(idx)
+                else:
+                    st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+
+        # 拡大サムネ：閉じるボタンで消す
+        if st.session_state["enlarged_idx"] is not None:
+            eidx = st.session_state["enlarged_idx"]
+            img_big = Image.open(uploaded_files[eidx])
+            st.markdown("---")
+            st.markdown(f"### 🟢 高画質最大表示")
+            st.image(img_big, use_column_width=True)
+            if st.button("拡大を閉じる", key="close_enlarge_eval"):
+                clear_enlarge()
+                st.experimental_rerun()
+
+        # スコア＋コメント付きファイル名ZIPダウンロード
+        st.markdown("---")
+        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
+            with ZipFile(zip_path, "w") as zipf:
+                for idx, file in enumerate(uploaded_files):
+                    img = Image.open(file)
+                    fname = clean_filename(os.path.basename(file.name))
+                    e = eval_map.get(fname, {})
+                    total = str(e.get("TotalScore", ""))
+                    buzz = str(e.get("BuzzScore", ""))
+                    still = str(e.get("StillScore", ""))
+                    video = str(e.get("VideoScore", ""))
+                    reason = str(e.get("Reason", ""))
+                    def clean(s):
+                        s = str(s)
+                        s = s.replace("/", "／").replace("\\", "＼").replace(":", "：").replace("*", "＊")
+                        s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
+                        s = s.replace(" ", "_").replace("\n", "")
+                        return s[:30]
+                    img_name = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                    save_path = os.path.join(tmpdir, img_name)
+                    img.save(save_path)
+                    zipf.write(save_path, arcname=img_name)
+            with open(zip_path, "rb") as f:
+                st.download_button("スコア＋コメント名ZIPダウンロード", f, file_name="Eval_named_images.zip")
 else:
     st.info("画像をアップロードしてください。")
