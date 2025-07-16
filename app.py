@@ -4,11 +4,10 @@ import pandas as pd
 import tempfile
 import os
 from zipfile import ZipFile
-import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜FileName主キー・Noズレゼロ安全版")
+st.title("AI画像評価システム｜No連番サムネ・増殖ゼロ・完全一致版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -25,30 +24,26 @@ def enlarge(idx):
 def clear_enlarge():
     st.session_state["enlarged_idx"] = None
 
-def clean_filename(s):
-    s = str(s)
-    s = s.strip().replace(" ", "").replace("　", "").replace("\n", "").replace("\t", "")
-    s = unicodedata.normalize("NFKC", s)
-    return s.lower()
+def get_no_filename(idx):
+    return f"No{idx+1}.png"
 
 if uploaded_files:
     st.markdown("---")
-    st.subheader("【ミニサムネ一覧／No連番＋ファイル名表示】")
+    st.subheader("【ミニサムネ一覧／No連番のみ表示】")
     images = []
-    filenames = []
     for file in uploaded_files:
         img = Image.open(file)
         img_thumb = img.copy()
         img_thumb.thumbnail((150, 150))
         images.append(img_thumb)
-        filenames.append(os.path.basename(file.name))
 
     NUM_COLS = 4
     thumb_width = 150
     cols = st.columns(NUM_COLS)
-    for idx, (img, fname) in enumerate(zip(images, filenames)):
+    for idx, img in enumerate(images):
+        no_fname = get_no_filename(idx)
         with cols[idx % NUM_COLS]:
-            st.image(img, caption=f"No{idx+1} / {fname}", width=thumb_width)
+            st.image(img, caption=no_fname, width=thumb_width)
 
     # --- No.連番リネームZIP一括DL ---
     st.markdown("---")
@@ -57,41 +52,33 @@ if uploaded_files:
         zip_path = os.path.join(tmpdir, "No_images.zip")
         for idx, file in enumerate(uploaded_files):
             img = Image.open(file)
-            img_name = f"No{idx+1}.png"
+            img_name = get_no_filename(idx)
             save_path = os.path.join(tmpdir, img_name)
             img.save(save_path)
         with ZipFile(zip_path, "w") as zipf:
             for idx in range(len(uploaded_files)):
-                img_name = f"No{idx+1}.png"
+                img_name = get_no_filename(idx)
                 zipf.write(os.path.join(tmpdir, img_name), arcname=img_name)
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AI評価プロンプト（現場でCSVアップ直前に明示） ---
+    # --- AI評価プロンプト ---
     st.markdown("---")
-    st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→Noリネーム画像を渡す）】")
+    st.markdown("## 🟣【AI評価プロンプト（No連番画像専用）】")
     ai_prompt = """あなたはAI画像審査員です。
 
 【評価ルール】
-- 各画像は“1枚ごとに完全独立”かつ“絶対評価”で採点してください。他の画像との比較・相対減点は禁止です。
-- 評価CSVはFileName主キーとし、No列や順位列は不要です。
-- Reason欄には各点数の理由・強み・短所も必ず明記。
-- 出力は下記形式を厳守。
+- 各画像は「No1.png, No2.png, ...」のファイル名で完全独立絶対評価してください。
+- 評価CSVはFileName主キーのみ。No列や元名列は不要。
+- Reason欄には点数根拠・短所も具体的に明記。
 
 【出力フォーマット】
 FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
-- FileNameには評価対象画像のファイル名（例：No3.png）を拡張子まで完全一致で記載してください。
-- 評価内容は各画像で完全独立（比較や連動点数は禁止）。
-- CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
-
-【例】
-FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
-No1.png,97,95,96,95,"独自性とインパクトが強く、映像化にも向く。"
-No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
+- FileNameには「No1.png」など連番ファイル名を必ず記載してください（拡張子・大文字小文字・空白含め完全一致）。
+- CSVは1行目ヘッダー、以降は画像ごと1行。
 """
     st.code(ai_prompt, language="markdown")
-    st.info("▲ このプロンプトをAIに貼付け、NoリネームZIP画像を渡して、CSVを返させてください。\nCSV生成指示も明記推奨。")
 
     # --- 評価済みCSV入力エリア（アップ & コピペ両対応）---
     st.markdown("---")
@@ -110,14 +97,14 @@ No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
     # --- 評価反映サムネ＆拡大・一括DL機能 ---
     if df_eval is not None:
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（No連番＋ファイル名・拡大ボタン付）】")
-        eval_map = {clean_filename(row["FileName"]): row for _, row in df_eval.iterrows()}
-        for idx, (img, fname_raw) in enumerate(zip(images, filenames)):
-            fname = clean_filename(fname_raw)
+        st.subheader("【評価反映サムネ一覧（No連番名・拡大ボタン付）】")
+        eval_map = {row["FileName"].strip(): row for _, row in df_eval.iterrows()}
+        for idx, img in enumerate(images):
+            no_fname = get_no_filename(idx)
             with cols[idx % NUM_COLS]:
-                st.image(img, caption=f"No{idx+1} / {fname_raw}", width=thumb_width)
-                if fname in eval_map:
-                    e = eval_map[fname]
+                st.image(img, caption=no_fname, width=thumb_width)
+                if no_fname in eval_map:
+                    e = eval_map[no_fname]
                     st.markdown(
                         f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
                         <b>総合:</b> {e['TotalScore']}　
@@ -152,8 +139,8 @@ No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
             with ZipFile(zip_path, "w") as zipf:
                 for idx, file in enumerate(uploaded_files):
                     img = Image.open(file)
-                    fname = clean_filename(os.path.basename(file.name))
-                    e = eval_map.get(fname, {})
+                    no_fname = get_no_filename(idx)
+                    e = eval_map.get(no_fname, {})
                     total = str(e.get("TotalScore", ""))
                     buzz = str(e.get("BuzzScore", ""))
                     still = str(e.get("StillScore", ""))
@@ -165,7 +152,7 @@ No2.png,88,85,87,89,"色彩や構図は良いがバズ度はやや控えめ。"
                         s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
                         s = s.replace(" ", "_").replace("\n", "")
                         return s[:30]
-                    img_name = f"No{idx+1}_{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                    img_name = f"{no_fname}_{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
                     save_path = os.path.join(tmpdir, img_name)
                     img.save(save_path)
                     zipf.write(save_path, arcname=img_name)
