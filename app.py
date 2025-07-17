@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜完全版")  # 固定
+st.title("AI画像評価システム｜完全版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -107,34 +107,44 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
         except Exception as e:
             st.warning("CSVの書式エラーまたは貼り付け内容不備")
 
-    # --- 評価反映サムネ＆拡大・一括DL機能（評価後だけ高画質・2カラム） ---
+    # --- 評価反映サムネ＆拡大・一括DL機能 ---
     if df_eval is not None:
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（No連番・高画質2カラム・拡大付）】")
-        eval_map = {clean_filename(row["FileName"]): row for _, row in df_eval.iterrows()}
-        high_cols = st.columns(2)
-        for idx, fname in enumerate(filenames):
-            key = clean_filename(fname)
-            img = Image.open(uploaded_files[idx])
-            with high_cols[idx % 2]:
-                st.image(img, caption=f"{fname}", width=400)
-                if key in eval_map:
-                    e = eval_map[key]
-                    st.markdown(
-                        f"""<div style="font-size: 15px; background:#222; border-radius:8px; color:#e4e4ff; padding:6px 14px 4px 14px; margin-top:10px; margin-bottom:14px;">
-                        <b>総合:</b> {e['TotalScore']}　
-                        <b>バズ:</b> {e['BuzzScore']}　
-                        <b>静止画:</b> {e['StillScore']}　
-                        <b>映像:</b> {e['VideoScore']}<br>
-                        <b>理由:</b> {e['Reason']}
-                        </div>""",
-                        unsafe_allow_html=True
-                    )
-                    if st.button("拡大", key=f"enlarge_eval_{idx}"):
-                        enlarge(idx)
-                else:
-                    st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
-        # 拡大サムネ：閉じるボタンで消す（rerun禁止・stopのみで安定化）
+        st.subheader("【評価反映サムネ一覧（2カラム×4行／高画質ソート／拡大付）】")
+
+        # ソート用辞書：ファイル名→idx
+        fname2idx = {f"No{idx+1}.png": idx for idx in range(len(uploaded_files))}
+        # df_eval: 総合得点（TotalScore）降順ソート
+        df_eval["TotalScore"] = pd.to_numeric(df_eval["TotalScore"], errors="coerce")
+        df_eval_sorted = df_eval.sort_values(by="TotalScore", ascending=False)
+        # ソート後リスト生成
+        sorted_items = []
+        for _, row in df_eval_sorted.iterrows():
+            fname = row["FileName"]
+            idx = fname2idx.get(fname)
+            if idx is not None:
+                sorted_items.append((idx, row))
+
+        # 高画質2カラム×4行（8件/枠）
+        eval_cols = st.columns(2)
+        for i, (img_idx, e) in enumerate(sorted_items):
+            col = eval_cols[i % 2]
+            with col:
+                img = Image.open(uploaded_files[img_idx])
+                st.image(img, caption=f"{e['FileName']}", width=420)
+                st.markdown(
+                    f"""<div style="font-size: 15px; background:#222; border-radius:8px; color:#e4e4ff; padding:6px 14px 4px 14px; margin-top:10px; margin-bottom:14px;">
+                    <b>総合:</b> {e['TotalScore']}　
+                    <b>バズ:</b> {e['BuzzScore']}　
+                    <b>静止画:</b> {e['StillScore']}　
+                    <b>映像:</b> {e['VideoScore']}<br>
+                    <b>理由:</b> {e['Reason']}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+                if st.button("拡大", key=f"enlarge_eval_{img_idx}"):
+                    enlarge(img_idx)
+        # 拡大サムネ
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -143,9 +153,9 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
             st.image(img_big, use_container_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                st.stop()
+                st.stop()  # rerun禁止
 
-        # スコア＋コメント付きファイル名画像を一括ZIP DL
+        # スコア＋コメント付きファイル名画像を一括ZIP DL（ナンバー無し名！）
         st.markdown("---")
         st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -155,7 +165,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                     img = Image.open(file)
                     fname = f"No{idx+1}.png"
                     key = clean_filename(fname)
-                    e = eval_map.get(key, {})
+                    e = df_eval.set_index("FileName").to_dict("index").get(fname, {})
                     total = str(e.get("TotalScore", ""))
                     buzz = str(e.get("BuzzScore", ""))
                     still = str(e.get("StillScore", ""))
@@ -167,7 +177,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                         s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
                         s = s.replace(" ", "_").replace("\n", "")
                         return s[:30]
-                    img_name = f"No{idx+1}_{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                    img_name = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
                     save_path = os.path.join(tmpdir, img_name)
                     img.save(save_path)
                     zipf.write(save_path, arcname=img_name)
