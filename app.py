@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜完全版")
+st.title("AI画像評価システム｜完全bit一致・現場版")
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -31,19 +31,23 @@ def clean_filename(s):
     s = unicodedata.normalize("NFKC", s)
     return s.lower()
 
-# アップロード画像→No連番
+# アップロード画像→No連番（拡張子も維持）
 images = []
 filenames = []
+exts = []
 if uploaded_files:
     for idx, file in enumerate(uploaded_files):
         img = Image.open(file)
         img_thumb = img.copy()
         img_thumb.thumbnail((200, 200))
         images.append(img_thumb)
-        filenames.append(f"No{idx+1}.png")
+        ext = os.path.splitext(file.name)[1].lower() or ".png"
+        exts.append(ext)
+        filenames.append(f"No{idx+1}{ext}")
 else:
     images = []
     filenames = []
+    exts = []
 
 NUM_COLS = 4
 thumb_width = 200
@@ -56,19 +60,22 @@ if uploaded_files:
         with cols[idx % NUM_COLS]:
             st.image(img, caption=f"{fname}", width=thumb_width)
 
-    # --- No.連番リネームZIP一括DL ---
+    # --- No.連番リネームZIP一括DL（bit一致） ---
     st.markdown("---")
-    st.subheader("No.連番リネーム画像を一括ZIP DL")
+    st.subheader("No.連番リネーム画像を一括ZIP DL（bit完全一致）")
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, "No_images.zip")
+        import shutil
         for idx, file in enumerate(uploaded_files):
-            img = Image.open(file)
-            img_name = f"No{idx+1}.png"
+            ext = os.path.splitext(file.name)[1].lower() or ".png"
+            img_name = f"No{idx+1}{ext}"
             save_path = os.path.join(tmpdir, img_name)
-            img.save(save_path)
+            with open(save_path, "wb") as f_save:
+                f_save.write(file.getbuffer())
         with ZipFile(zip_path, "w") as zipf:
             for idx in range(len(uploaded_files)):
-                img_name = f"No{idx+1}.png"
+                ext = os.path.splitext(uploaded_files[idx].name)[1].lower() or ".png"
+                img_name = f"No{idx+1}{ext}"
                 zipf.write(os.path.join(tmpdir, img_name), arcname=img_name)
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
@@ -115,7 +122,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
         st.subheader("【評価反映サムネ一覧（2カラム×4行／高画質ソート／拡大付）】")
 
         # ソート用辞書：ファイル名→idx
-        fname2idx = {f"No{idx+1}.png": idx for idx in range(len(uploaded_files))}
+        fname2idx = {f"No{idx+1}{exts[idx]}": idx for idx in range(len(uploaded_files))}
         df_eval["TotalScore"] = pd.to_numeric(df_eval["TotalScore"], errors="coerce")
         df_eval_sorted = df_eval.sort_values(by="TotalScore", ascending=False)
         sorted_items = []
@@ -144,7 +151,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                 if st.button("拡大", key=f"enlarge_eval_{img_idx}"):
                     enlarge(img_idx)
 
-        # 拡大サムネ（ワンクリックで消す・return禁止！）
+        # 拡大サムネ（ワンクリックで消す）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -154,24 +161,24 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
 
-        # スコア＋コメント付きファイル名画像を一括ZIP DL（劣化ゼロ版）
+        # スコア＋コメント付きファイル名画像を一括ZIP DL（bit一致）
         st.markdown("---")
-        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL（劣化なしbit完全一致）")
+        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL（bit完全一致）")
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
-            # まずNoリネーム名で一時保存＋bit一致コピー
+            import shutil
+            # まずNo名でbit一致保存
             src_paths = []
             for idx, file in enumerate(uploaded_files):
-                no_fname = f"No{idx+1}.png"
+                ext = os.path.splitext(file.name)[1].lower() or ".png"
+                no_fname = f"No{idx+1}{ext}"
                 src_path = os.path.join(tmpdir, no_fname)
-                # UploadedFile からbit一致で保存
                 with open(src_path, "wb") as fsrc:
                     fsrc.write(file.getbuffer())
-                src_paths.append(src_path)
+                src_paths.append((no_fname, src_path))
             # コメント名でリネーム（内容はbit一致のまま）
-            for idx, src_path in enumerate(src_paths):
-                fname = f"No{idx+1}.png"
-                e = df_eval.set_index("FileName").to_dict("index").get(fname, {})
+            for idx, (no_fname, src_path) in enumerate(src_paths):
+                e = df_eval.set_index("FileName").to_dict("index").get(no_fname, {})
                 total = str(e.get("TotalScore", ""))
                 buzz = str(e.get("BuzzScore", ""))
                 still = str(e.get("StillScore", ""))
@@ -183,16 +190,17 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                     s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
                     s = s.replace(" ", "_").replace("\n", "")
                     return s[:30]
-                comment_fname = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
-                # コメント名付きで物理コピー
+                ext = os.path.splitext(no_fname)[1]
+                comment_fname = f"{total}_{buzz}_{still}_{video}_{clean(reason)}{ext}"
                 comment_path = os.path.join(tmpdir, comment_fname)
-                import shutil
                 shutil.copy(src_path, comment_path)
             # ZIP化
             with ZipFile(zip_path, "w") as zipf:
                 for fname in os.listdir(tmpdir):
-                    # No1.pngなどの一時ファイルはスキップ
-                    if fname.endswith(".png") and not fname.startswith("No"):
+                    if not fname.startswith("No") and (fname.endswith(".png") or fname.endswith(".jpg") or fname.endswith(".jpeg")):
                         zipf.write(os.path.join(tmpdir, fname), arcname=fname)
             with open(zip_path, "rb") as f:
                 st.download_button("スコア＋コメント名ZIPダウンロード", f, file_name="Eval_named_images.zip")
+
+else:
+    st.info("画像をアップロードしてください。")
