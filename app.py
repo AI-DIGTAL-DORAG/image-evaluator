@@ -8,7 +8,7 @@ import unicodedata
 import io
 
 st.set_page_config(layout="wide")
-st.title("AI画像評価システム｜Noリネーム主軸・絶対ズレない完全版")
+st.title("AI画像評価システム｜完全版")  # 固定
 
 uploaded_files = st.file_uploader(
     "画像をまとめてアップロード（最大10枚／ドラッグ＆ドロップ可）",
@@ -31,16 +31,16 @@ def clean_filename(s):
     s = unicodedata.normalize("NFKC", s)
     return s.lower()
 
-# 1. 画像アップロード→Noリネーム基軸配列構築
+# アップロード画像→No連番
 images = []
 filenames = []
 if uploaded_files:
     for idx, file in enumerate(uploaded_files):
         img = Image.open(file)
         img_thumb = img.copy()
-        img_thumb.thumbnail((200, 200))  # ミニサムネは固定サイズ
+        img_thumb.thumbnail((200, 200))
         images.append(img_thumb)
-        filenames.append(f"No{idx+1}.png")  # 強制No連番
+        filenames.append(f"No{idx+1}.png")
 else:
     images = []
     filenames = []
@@ -56,7 +56,7 @@ if uploaded_files:
         with cols[idx % NUM_COLS]:
             st.image(img, caption=f"{fname}", width=thumb_width)
 
-    # --- No.連番リネームZIP一括DL（100%No1.png～No10.png） ---
+    # --- No.連番リネームZIP一括DL ---
     st.markdown("---")
     st.subheader("No.連番リネーム画像を一括ZIP DL")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -73,28 +73,27 @@ if uploaded_files:
         with open(zip_path, "rb") as f:
             st.download_button("No.連番ZIPダウンロード", f, file_name="No_images.zip")
 
-    # --- AI評価プロンプト表示（Noリネーム名で渡せと明示） ---
+    # --- AI評価プロンプト表示（絶対変更禁止） ---
     st.markdown("---")
     st.markdown("## 🟣【AI評価プロンプト（ChatGPT等にコピペ→Noリネーム画像を必ず渡す）】")
     ai_prompt = """あなたはAI画像審査員です。
 
 【評価ルール】
-- 必ずNo1.png, No2.png…というファイル名で画像が渡されます（例：No3.png）。
-- FileNameにはそのファイル名（NoX.png）を必ず記載し、他カラムも各画像ごとに記入してください。
-- 評価は1枚ごとに完全独立、比較や相対評価は禁止。
+- 画像は「1枚ごとに完全独立」かつ「絶対評価」で採点してください。他画像との比較や相対減点は禁止です。
+- 評価CSVはFileName主キーとし、No列や順位列は不要です。
+- Reason欄には各点数の理由・強み・短所も必ず明記。
 - 出力は下記形式を厳守。
 
 【出力フォーマット】
 FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
-例：
-FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
-No1.png,98,96,94,97,"バズ度・映像化適性とも最高。"
-No2.png,92,89,91,90,"構図・色彩優秀、バズは普通。"
+- FileNameには評価対象画像のファイル名（例：No3.png）を正確に記載してください（拡張子まで完全一致）。
+- 評価内容は各画像で完全独立（比較や連動点数は禁止）。
+- CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
 """
     st.code(ai_prompt, language="markdown")
 
-    # --- 評価CSVアップ & コピペ両対応、完全No主キー ---
+    # --- 評価CSVアップ & コピペ両対応 ---
     st.markdown("---")
     st.markdown("### 🟢【AI評価CSVのアップロード or コピペ入力】")
     eval_up = st.file_uploader("評価済みCSV（FileName列＝Noリネーム名のみ）", type="csv", key="evalcsvbottom")
@@ -108,20 +107,21 @@ No2.png,92,89,91,90,"構図・色彩優秀、バズは普通。"
         except Exception as e:
             st.warning("CSVの書式エラーまたは貼り付け内容不備")
 
-    # --- 評価反映サムネ＆拡大・一括DL機能（絶対No連番でマッチ） ---
+    # --- 評価反映サムネ＆拡大・一括DL機能（評価後だけ高画質・2カラム） ---
     if df_eval is not None:
         st.markdown("---")
-        st.subheader("【評価反映サムネ一覧（No連番・拡大付・絶対ズレない）】")
+        st.subheader("【評価反映サムネ一覧（No連番・高画質2カラム・拡大付）】")
         eval_map = {clean_filename(row["FileName"]): row for _, row in df_eval.iterrows()}
-        cols = st.columns(NUM_COLS)
-        for idx, (img, fname) in enumerate(zip(images, filenames)):
+        high_cols = st.columns(2)
+        for idx, fname in enumerate(filenames):
             key = clean_filename(fname)
-            with cols[idx % NUM_COLS]:
-                st.image(img, caption=f"{fname}", width=thumb_width)
+            img = Image.open(uploaded_files[idx])
+            with high_cols[idx % 2]:
+                st.image(img, caption=f"{fname}", width=400)
                 if key in eval_map:
                     e = eval_map[key]
                     st.markdown(
-                        f"""<div style="font-size: 13px; background:#222; border-radius:6px; color:#e4e4ff; padding:3px 8px 2px 8px; margin-top:5px; margin-bottom:10px;">
+                        f"""<div style="font-size: 15px; background:#222; border-radius:8px; color:#e4e4ff; padding:6px 14px 4px 14px; margin-top:10px; margin-bottom:14px;">
                         <b>総合:</b> {e['TotalScore']}　
                         <b>バズ:</b> {e['BuzzScore']}　
                         <b>静止画:</b> {e['StillScore']}　
@@ -134,7 +134,7 @@ No2.png,92,89,91,90,"構図・色彩優秀、バズは普通。"
                         enlarge(idx)
                 else:
                     st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
-        # 拡大サムネ：閉じるボタンで消す
+        # 拡大サムネ：閉じるボタンで消す（rerun禁止・stopのみで安定化）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -143,9 +143,9 @@ No2.png,92,89,91,90,"構図・色彩優秀、バズは普通。"
             st.image(img_big, use_container_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                st.experimental_rerun()
+                st.stop()
 
-        # スコア＋コメント付きファイル名画像を一括ZIP DL（No連番強制）
+        # スコア＋コメント付きファイル名画像を一括ZIP DL
         st.markdown("---")
         st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
         with tempfile.TemporaryDirectory() as tmpdir:
