@@ -154,34 +154,45 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
 
-        # スコア＋コメント付きファイル名画像を一括ZIP DL
+        # スコア＋コメント付きファイル名画像を一括ZIP DL（劣化ゼロ版）
         st.markdown("---")
-        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
+        st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL（劣化なしbit完全一致）")
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
+            # まずNoリネーム名で一時保存＋bit一致コピー
+            src_paths = []
+            for idx, file in enumerate(uploaded_files):
+                no_fname = f"No{idx+1}.png"
+                src_path = os.path.join(tmpdir, no_fname)
+                # UploadedFile からbit一致で保存
+                with open(src_path, "wb") as fsrc:
+                    fsrc.write(file.getbuffer())
+                src_paths.append(src_path)
+            # コメント名でリネーム（内容はbit一致のまま）
+            for idx, src_path in enumerate(src_paths):
+                fname = f"No{idx+1}.png"
+                e = df_eval.set_index("FileName").to_dict("index").get(fname, {})
+                total = str(e.get("TotalScore", ""))
+                buzz = str(e.get("BuzzScore", ""))
+                still = str(e.get("StillScore", ""))
+                video = str(e.get("VideoScore", ""))
+                reason = str(e.get("Reason", ""))
+                def clean(s):
+                    s = str(s)
+                    s = s.replace("/", "／").replace("\\", "＼").replace(":", "：").replace("*", "＊")
+                    s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
+                    s = s.replace(" ", "_").replace("\n", "")
+                    return s[:30]
+                comment_fname = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
+                # コメント名付きで物理コピー
+                comment_path = os.path.join(tmpdir, comment_fname)
+                import shutil
+                shutil.copy(src_path, comment_path)
+            # ZIP化
             with ZipFile(zip_path, "w") as zipf:
-                for idx, file in enumerate(uploaded_files):
-                    img = Image.open(file)
-                    fname = f"No{idx+1}.png"
-                    key = clean_filename(fname)
-                    e = df_eval.set_index("FileName").to_dict("index").get(fname, {})
-                    total = str(e.get("TotalScore", ""))
-                    buzz = str(e.get("BuzzScore", ""))
-                    still = str(e.get("StillScore", ""))
-                    video = str(e.get("VideoScore", ""))
-                    reason = str(e.get("Reason", ""))
-                    def clean(s):
-                        s = str(s)
-                        s = s.replace("/", "／").replace("\\", "＼").replace(":", "：").replace("*", "＊")
-                        s = s.replace("?", "？").replace('"', "”").replace("<", "＜").replace(">", "＞").replace("|", "｜")
-                        s = s.replace(" ", "_").replace("\n", "")
-                        return s[:30]
-                    img_name = f"{total}_{buzz}_{still}_{video}_{clean(reason)}.png"
-                    save_path = os.path.join(tmpdir, img_name)
-                    img.save(save_path)
-                    zipf.write(save_path, arcname=img_name)
+                for fname in os.listdir(tmpdir):
+                    # No1.pngなどの一時ファイルはスキップ
+                    if fname.endswith(".png") and not fname.startswith("No"):
+                        zipf.write(os.path.join(tmpdir, fname), arcname=fname)
             with open(zip_path, "rb") as f:
                 st.download_button("スコア＋コメント名ZIPダウンロード", f, file_name="Eval_named_images.zip")
-
-else:
-    st.info("画像をアップロードしてください。")
