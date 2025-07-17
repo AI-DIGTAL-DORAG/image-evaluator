@@ -88,6 +88,8 @@ if uploaded_files:
 FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
 
 - FileNameには評価対象画像のファイル名（例：No3.png）を正確に記載してください（拡張子まで完全一致）。
+- どんな場合もFileName列には、画像そのもののファイル名（例：No3.png）を必ず書いてください。
+- 画像のアップ順や表示順に関係なく、ファイル名が唯一の評価キーになります。
 - 評価内容は各画像で完全独立（比較や連動点数は禁止）。
 - CSV形式（カンマ区切り）で出力し、必ず一行目がヘッダーになるようにしてください。
 """
