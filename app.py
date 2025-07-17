@@ -142,7 +142,7 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
                 if st.button("拡大", key=f"enlarge_eval_{img_idx}"):
                     enlarge(img_idx)
 
-        # 拡大サムネ（ワンクリックで消す）
+        # 拡大サムネ（ワンクリックで消す・return禁止！）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
             img_big = Image.open(uploaded_files[eidx])
@@ -151,7 +151,6 @@ FileName,TotalScore,BuzzScore,StillScore,VideoScore,Reason
             st.image(img_big, use_container_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                return
 
         # スコア＋コメント付きファイル名画像を一括ZIP DL
         st.markdown("---")
