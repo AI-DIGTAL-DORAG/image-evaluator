@@ -1,5 +1,3 @@
-# ...省略（アップロード部分やAIプロンプト等は前回のまま）...
-
     # --- 評価反映サムネ＆拡大・一括DL機能 ---
     if df_eval is not None:
         st.markdown("---")
@@ -21,7 +19,7 @@
             col = eval_cols[i % 2]
             with col:
                 img = Image.open(uploaded_files[img_idx])
-                st.image(img, caption=f"{e['FileName']}", use_container_width=True)  # 最大化
+                st.image(img, caption=f"{e['FileName']}", use_container_width=True)
                 st.markdown(
                     f"""<div style="font-size: 15px; background:#222; border-radius:8px; color:#e4e4ff; padding:6px 14px 4px 14px; margin-top:10px; margin-bottom:14px;">
                     <b>総合:</b> {e['TotalScore']}　
@@ -34,6 +32,7 @@
                 )
                 if st.button("拡大", key=f"enlarge_eval_{img_idx}"):
                     enlarge(img_idx)
+
         # 拡大サムネ（ワンクリックで消す）
         if st.session_state["enlarged_idx"] is not None:
             eidx = st.session_state["enlarged_idx"]
@@ -43,14 +42,14 @@
             st.image(img_big, use_container_width=True)
             if st.button("拡大を閉じる", key="close_enlarge_eval"):
                 clear_enlarge()
-                # すぐreturnで再描画（ワンクリック閉じ・DLボタンも消えない）
                 return
 
-        # スコア＋コメント付きファイル名画像を一括ZIP DL（ナンバー無し名！）
+        # スコア＋コメント付きファイル名画像を一括ZIP DL
         st.markdown("---")
         st.subheader("4軸スコア＋コメント付きファイル名画像を一括ZIP DL")
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "Eval_named_images.zip")
+            from zipfile import ZipFile
             with ZipFile(zip_path, "w") as zipf:
                 for idx, file in enumerate(uploaded_files):
                     img = Image.open(file)
@@ -74,6 +73,3 @@
                     zipf.write(save_path, arcname=img_name)
             with open(zip_path, "rb") as f:
                 st.download_button("スコア＋コメント名ZIPダウンロード", f, file_name="Eval_named_images.zip")
-
-else:
-    st.info("画像をアップロードしてください。")
